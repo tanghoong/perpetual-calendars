@@ -7,16 +7,21 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Read-only by default. Only the deploy job below opts into write, so pull
+# request builds — which run PR-controlled npm lifecycle scripts and build
+# code — never hold a token that can push to the repository.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
@@ -32,22 +37,37 @@ jobs:
       env:
         CI: true
 
-    - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      if: github.ref == 'refs/heads/main'
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
-        publish_branch: gh-pages
-        commit_message: "Deploy to GitHub Pages: ${{ github.event.head_commit.message }}"
-        full_commit_message: ${{ github.event.head_commit.message }}
-        user_name: 'github-actions[bot]'
-        user_email: 'github-actions[bot]@users.noreply.github.com'
-        force_orphan: true
-        enable_jekyll: false
-
-    - name: Upload artifacts
+    - name: Upload build output
       uses: actions/upload-artifact@v4
       with:
         name: dist
         path: dist
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    # Scoped to this job so the write-capable token exists only here, where
+    # the only thing that runs is the publish action.
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download build output
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist
+
+    - name: Publish to gh-pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist
+        publish_branch: gh-pages
+        commit_message: "Deploy to GitHub Pages: ${{ github.event.head_commit.message || github.sha }}"
+        user_name: 'github-actions[bot]'
+        user_email: 'github-actions[bot]@users.noreply.github.com'
+        force_orphan: true
+        enable_jekyll: false

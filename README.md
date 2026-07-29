@@ -176,7 +176,9 @@ For a calendar whose entire premise is fitting on one page, `@media print` is a 
 
 ## Deployment
 
-`.github/workflows/deploy.yml` builds on every push to `main` and publishes `dist/` to the `gh-pages` branch via `peaceiris/actions-gh-pages`, authenticating with the built-in `GITHUB_TOKEN` under a `permissions: contents: write` grant — no repository secret to configure.
+`.github/workflows/deploy.yml` runs two jobs. `build` compiles the app and uploads `dist/` as an artifact; it runs for pushes and pull requests alike. `deploy` runs only when the ref is `main`, downloads that artifact, and publishes it to the `gh-pages` branch via `peaceiris/actions-gh-pages`, authenticating with the built-in `GITHUB_TOKEN` — no repository secret to configure.
+
+The split exists for least privilege. The workflow's default grant is `contents: read`, and only `deploy` opts into `contents: write`. Since the workflow also triggers on `pull_request`, a single-job version would hand a write-capable token to every PR build — and PR builds execute PR-controlled npm lifecycle scripts and build code. An `if` on the deploy step would not help, because the earlier steps in the same job still hold the token. The `build` job also checks out with `persist-credentials: false` so no token is left behind in `.git/config`.
 
 The site serves from `https://tanghoong.github.io/perpetual-calendars/`, which is why `vite.config.ts` sets `base: '/perpetual-calendars/'`. Changing the repository name means changing that base, or the built asset URLs will 404.
 
