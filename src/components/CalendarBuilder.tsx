@@ -70,7 +70,7 @@ const CalendarBuilder = () => {
       const firstDay = getFirstDayOfMonth(year, i);
       return firstDay;
     });
-    let columns: string[][] = Array(7).fill(null).map(() => []);
+    const columns: string[][] = Array(7).fill(null).map(() => []);
     positions.forEach((pos, idx) => {
       columns[pos].push(translations[language].months[idx]);
     });
@@ -90,17 +90,21 @@ const CalendarBuilder = () => {
     return grid;
   };
 
-  const isHighlighted = (section: string, rowIdx: number, colIdx: number): boolean => {
-    if (section !== 'weekdays') return false;
-    
+  // Computed once per render — both are pure and were previously rebuilt
+  // inside the row loops, recomputing the same values on every row.
+  const monthPositions = getMonthPositions(year);
+  const weekdayGrid = generateWeekdayGrid();
+  const monthRowCount = Math.max(...monthPositions.map(col => col.length));
+
+  const isHighlighted = (rowIdx: number, colIdx: number): boolean => {
     if (hoverCoords.row !== null || hoverCoords.col !== null) {
       return rowIdx === hoverCoords.row || colIdx === hoverCoords.col;
     }
 
     if (year === currentYear) {
       const currentMonthColumn = getCurrentMonthColumn(year, currentMonth);
-      const currentDateRow = Math.floor((currentDate - 1) % 7);
-      
+      const currentDateRow = (currentDate - 1) % 7;
+
       return colIdx === currentMonthColumn && rowIdx === currentDateRow;
     }
 
@@ -108,11 +112,11 @@ const CalendarBuilder = () => {
   };
 
   const isPastDate = (num: number): boolean => {
-    return year === currentYear && currentMonth === new Date().getMonth() && num < currentDate;
+    return year === currentYear && num < currentDate;
   };
 
   const isToday = (num: number): boolean => {
-    return year === currentYear && num === currentDate && currentMonth === new Date().getMonth();
+    return year === currentYear && num === currentDate;
   };
 
   const hasThirtyOneDays = (monthName: string): boolean => {
@@ -188,14 +192,14 @@ const CalendarBuilder = () => {
           <table className="w-full border-separate border-spacing-[2px]">
             <tbody>
               {/* Month Row */}
-              {Array.from({ length: Math.max(...getMonthPositions(year).map(col => col.length)) }, (_, rowIdx) => (
+              {Array.from({ length: monthRowCount }, (_, rowIdx) => (
                 <tr key={`month-${rowIdx}`}>
                   {/* Left side empty cells to align with date grid */}
                   {[1,2,3,4,5].map((colIdx) => (
                     <td key={`empty-left-${colIdx}`} />
                   ))}
                   {/* Month cells */}
-                  {getMonthPositions(year).map((column, colIdx) => (
+                  {monthPositions.map((column, colIdx) => (
                     <td key={`month-${colIdx}`} className="p-[1px]">
                       {column[rowIdx] && (
                         <div 
@@ -229,7 +233,7 @@ const CalendarBuilder = () => {
                                    ? 'bg-blue-500 text-white' 
                                    : isPastDate(num)
                                      ? 'text-gray-400'
-                                     : 'text-gray-600 hover:bg-gray-10'}
+                                     : 'text-gray-600 hover:bg-gray-100'}
                                  ${num === 31 ? 'underline decoration-2 underline-offset-4' : ''}`}
                         >
                           {num}
@@ -239,16 +243,16 @@ const CalendarBuilder = () => {
                   })}
 
                   {/* Weekday cells */}
-                  {generateWeekdayGrid()[rowIdx].map((day, colIdx) => (
+                  {weekdayGrid[rowIdx].map((day, colIdx) => (
                     <td key={`weekday-${colIdx}`} className="p-[1px]">
                       <div 
                         onMouseEnter={() => setHoverCoords({ row: rowIdx, col: colIdx })}
                         onMouseLeave={() => setHoverCoords({ row: null, col: null })}
                         className={`h-8 flex items-center justify-center rounded-md text-xs font-medium
                                transition-colors duration-150 cursor-pointer
-                               ${isHighlighted('weekdays', rowIdx, colIdx)
-                                 ? 'bg-blue-500 text-white' 
-                                 : 'hover:bg-gray-10'}
+                               ${isHighlighted(rowIdx, colIdx)
+                                 ? 'bg-blue-500 text-white'
+                                 : 'hover:bg-gray-100'}
                                ${(day.includes('Sun') || day.includes('周日') || day.includes('Ahd') || day === 'CN')
                                  ? 'text-red-500'
                                  : 'text-gray-600'}`}
