@@ -69,7 +69,7 @@ Month and weekday labels switch between **English / 中文 / Melayu / Tiếng Vi
 | **Today, triangulated** | The current month chip, today's date, and the weekday cell where they intersect are all highlighted at once. |
 | **Crosshair tracing** | Hovering any weekday cell lights its full row and column, so you can follow a lookup without losing your place. |
 | **31-day markers** | Months with 31 days are underlined, as is date `31` — a reminder that not every column runs to the bottom. |
-| **Elapsed days dimmed** | In the current year, dates before today are greyed out. |
+| **Elapsed day numbers dimmed** | In the current year, day numbers below today's are greyed out. This is a day-of-month comparison, not a date comparison — the date block is shared by all 12 months, so it dims the 3rd of December just as readily as the 3rd of January. See #6. |
 | **Sunday in red** | Across all 7 rotations, so the weekend edge stays findable in a rotated grid. |
 | **4 languages** | English · 中文 · Melayu · Tiếng Việt, switchable live. |
 | **No dependencies for the math** | ~270 lines, native `Date` only — no moment, no date-fns, no timezone surprises. |
@@ -138,15 +138,24 @@ The lockfile resolves ESLint to 9.15 while `typescript-eslint` is pinned at `^8.
 `vite.config.ts` sets `base: '/'`, but a GitHub Pages project site serves from `/perpetual-calendars/`. Set `base: '/perpetual-calendars/'` (or derive it from `import.meta.env`). Relatedly, `package.json#homepage` is still the boilerplate placeholder `https://username.github.io/react-tailwind-boilerplate/`, and `name` is still `react-tailwind-boilerplate`.
 
 **4. The workflow needs a PAT it may not have.**
-`deploy.yml` authenticates with `secrets.PERSONAL_ACCESS_TOKEN`. The built-in `github_token: ${{ secrets.GITHUB_TOKEN }}` works for same-repo Pages deploys and needs no secret management.
+`deploy.yml` authenticates with `secrets.PERSONAL_ACCESS_TOKEN`. The built-in `github_token: ${{ secrets.GITHUB_TOKEN }}` covers same-repo Pages deploys with no secret management — but it is not a pure drop-in: the workflow declares no `permissions` block, so on a repository whose default workflow token is read-only it still cannot push `gh-pages`. Add the grant explicitly:
+
+```yaml
+permissions:
+  contents: write
+```
 
 **5. `index.html` is unbranded.**
 Title is still `Vite + React + TS`, the favicon is `vite.svg`, and there is no description or Open Graph tag — which matters for a tool whose main distribution channel is a shared link.
 
 ### Correctness and UX
 
-**6. Month lengths aren't modelled.**
-The date block always shows 1–31. February (28/29) and the 30-day months aren't masked, and leap years get no indication — the reader has to supply that knowledge. Dimming out-of-range dates for the hovered month would close the gap.
+**6. The date axis is month-agnostic, but two features treat it as month-specific.**
+The date block always shows 1–31 for every month. February (28/29) and the 30-day months aren't masked, and leap years get no indication — the reader has to supply that knowledge.
+
+The same gap makes `isPastDate()` misleading: it tests `num < currentDate`, a day-of-month comparison on cells that belong to all twelve months at once. Late in a month it dims day numbers that are still in the future for every later month, while the 29th–31st of already-elapsed months stay undimmed. `isToday()` has the same shape. Both read as "past/today" but only mean "lower-numbered than today".
+
+Dimming out-of-range and elapsed dates relative to a *hovered or selected month* would fix the month-length gap and the comparison gap together.
 
 **7. i18n logic matches on translated strings, not indices.**
 `hasThirtyOneDays()` keeps four parallel arrays of localized month names, and the Sunday-red test is a string check (`day.includes('Sun') || day.includes('周日') || day.includes('Ahd') || day === 'CN'`). Adding a fifth language means editing string lists in two more places, and any label collision across locales silently mis-renders. Both should key off the month/weekday **index**, which is already available.
