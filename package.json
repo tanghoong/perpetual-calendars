@@ -1,9 +1,9 @@
 {
-  "name": "react-tailwind-boilerplate",
+  "name": "perpetual-calendars",
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "homepage": "https://username.github.io/react-tailwind-boilerplate/",
+  "homepage": "https://tanghoong.github.io/perpetual-calendars/",
   "scripts": {
     "dev": "vite",
     "lint": "eslint .",

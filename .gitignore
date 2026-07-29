@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 .env
+# Local screenshot scratch (see docs/ for committed images)
+.screenshots/
