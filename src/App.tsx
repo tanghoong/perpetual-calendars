@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import CalendarBuilder from './components/CalendarBuilder'
 import './App.css'
 

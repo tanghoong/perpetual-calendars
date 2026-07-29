@@ -88,18 +88,18 @@ npm run dev
 
 Open <http://localhost:5173>.
 
-> **Heads up:** `npm run build`, `npm run lint`, and `npm start` currently fail on a clean checkout. `npm run dev` works. See [Known issues](#known-issues) for the one-line fixes.
+> **Heads up:** `npm run lint` and `npm start` still fail on a clean checkout. `npm run dev` and `npm run build` work. See [Known issues](#known-issues) for the one-line fixes.
 
 ### Scripts
 
 | Script | What it does | Status |
 |---|---|---|
 | `npm run dev` | Vite dev server with HMR | ✅ works |
-| `npm run build` | `tsc -b && vite build` → `dist/` | ❌ fails — see #1 |
-| `npm run preview` | Serve the production build locally | ✅ (after a successful build) |
-| `npm run lint` | ESLint over the repo | ❌ crashes — see #2 |
-| `npm start` | Serve `dist/` via Express | ❌ fails — see #3 |
-| `npm run deploy` | `gh-pages -d dist` | ⚠️ depends on `build` |
+| `npm run build` | `tsc -b && vite build` → `dist/` | ✅ works |
+| `npm run preview` | Serve the production build locally | ✅ works |
+| `npm run lint` | ESLint over the repo | ❌ crashes — see #1 |
+| `npm start` | Serve `dist/` via Express | ❌ fails — see #2 |
+| `npm run deploy` | `gh-pages -d dist` | ✅ works (see #3 for the base path caveat) |
 
 ### Project layout
 
@@ -122,73 +122,61 @@ Everything meaningful lives in `CalendarBuilder.tsx`. The functions worth knowin
 
 ## Known issues
 
-Verified against a clean `npm ci` on this branch. The first three block the standard workflow, so they're listed with their fixes.
+Verified against a clean `npm ci` on this branch. The first two block the standard workflow, so they're listed with their fixes.
 
 ### Blocking
 
-**1. `npm run build` fails — and takes CI down with it.**
-`tsconfig.app.json` sets `noUnusedLocals` / `noUnusedParameters`, and four symbols are unused:
-
-```
-src/App.tsx(1,1)                     'useState' is declared but never read
-src/components/CalendarBuilder.tsx(1,8)   'React' is declared but never read
-src/components/CalendarBuilder.tsx(1,27)  'useEffect' is declared but never read
-src/components/CalendarBuilder.tsx(28,9)  'currentDay' is declared but never read
-```
-
-Deleting those four declarations fixes it. Because `.github/workflows/deploy.yml` runs `npm run build`, **the deploy workflow fails on every push to `main`** — there is currently no published site.
-
-**2. `npm run lint` crashes.**
+**1. `npm run lint` crashes.**
 The lockfile resolves ESLint to 9.15 while `typescript-eslint` is pinned at `^8.7`; the `no-unused-expressions` rule then throws `Cannot read properties of undefined (reading 'allowShortCircuit')`. Bump `typescript-eslint` to `^8.15`.
 
-**3. `npm start` fails.**
+**2. `npm start` fails.**
 `server.js` does `import express from 'express'`, but `express` is in neither `dependencies` nor the lockfile. Either add it or drop `server.js` — `npm run preview` already covers local production serving.
 
 ### Deployment
 
-**4. Asset paths will 404 on a project page.**
+**3. Asset paths will 404 on a project page.**
 `vite.config.ts` sets `base: '/'`, but a GitHub Pages project site serves from `/perpetual-calendars/`. Set `base: '/perpetual-calendars/'` (or derive it from `import.meta.env`). Relatedly, `package.json#homepage` is still the boilerplate placeholder `https://username.github.io/react-tailwind-boilerplate/`, and `name` is still `react-tailwind-boilerplate`.
 
-**5. The workflow needs a PAT it may not have.**
+**4. The workflow needs a PAT it may not have.**
 `deploy.yml` authenticates with `secrets.PERSONAL_ACCESS_TOKEN`. The built-in `github_token: ${{ secrets.GITHUB_TOKEN }}` works for same-repo Pages deploys and needs no secret management.
 
-**6. `index.html` is unbranded.**
+**5. `index.html` is unbranded.**
 Title is still `Vite + React + TS`, the favicon is `vite.svg`, and there is no description or Open Graph tag — which matters for a tool whose main distribution channel is a shared link.
 
 ### Correctness and UX
 
-**7. Month lengths aren't modelled.**
+**6. Month lengths aren't modelled.**
 The date block always shows 1–31. February (28/29) and the 30-day months aren't masked, and leap years get no indication — the reader has to supply that knowledge. Dimming out-of-range dates for the hovered month would close the gap.
 
-**8. i18n logic matches on translated strings, not indices.**
+**7. i18n logic matches on translated strings, not indices.**
 `hasThirtyOneDays()` keeps four parallel arrays of localized month names, and the Sunday-red test is a string check (`day.includes('Sun') || day.includes('周日') || day.includes('Ahd') || day === 'CN'`). Adding a fifth language means editing string lists in two more places, and any label collision across locales silently mis-renders. Both should key off the month/weekday **index**, which is already available.
 
-**9. The crosshair is hover-only.**
+**8. The crosshair is hover-only.**
 `onMouseEnter`/`onMouseLeave` means touch and keyboard users get no tracing aid at all — on mobile, the single most useful interaction is simply absent. Tap-to-pin plus focus/arrow-key navigation would fix both.
 
-**10. The mobile layout is a rotation hack.**
+**9. The mobile layout is a rotation hack.**
 Below 768px the whole component is `rotate(90deg) translate(0,-100%)`, which turns the page sideways rather than reflowing. It breaks scroll direction and text selection. A responsive grid or horizontal scroll container would behave properly.
 
-**11. Accessibility gaps.**
+**10. Accessibility gaps.**
 The grid is a `<table>` with no `<th>`, `<caption>`, or `scope` attributes, so screen readers can't announce the row/column relationship the entire design depends on. State (today, past, highlighted) is conveyed by color alone, and the language `<select>` has no associated label.
 
-**12. Nothing is persisted or shareable.**
+**11. Nothing is persisted or shareable.**
 Year and language reset on every reload. Reading them from the URL (`?year=2027&lang=zh`) and mirroring to `localStorage` would make a specific view linkable.
 
-**13. No print stylesheet.**
+**12. No print stylesheet.**
 For a calendar whose entire premise is fitting on one page, `@media print` is a conspicuous omission.
 
 ### Housekeeping
 
-**14. Boilerplate residue.** `src/App.css` still ships an unused `.spin-slow` animation; `src/assets/react.svg` and `public/vite.svg` are unused.
-**15. No tests.** The date math (`getMonthPositions`, `generateWeekdayGrid`) is pure and takes a number, returns an array — near-zero-friction to test, and it's the part that must never be wrong.
-**16. No LICENSE file.** The previous README advertised MIT, but no license file was ever committed. See [License](#license).
+**13. Boilerplate residue.** `src/App.css` still ships an unused `.spin-slow` animation; `src/assets/react.svg` and `public/vite.svg` are unused.
+**14. No tests.** The date math (`getMonthPositions`, `generateWeekdayGrid`) is pure and takes a number, returns an array — near-zero-friction to test, and it's the part that must never be wrong.
+**15. No LICENSE file.** The previous README advertised MIT, but no license file was ever committed. See [License](#license).
 
 ---
 
 ## Deployment
 
-`.github/workflows/deploy.yml` builds on every push to `main` and publishes `dist/` to the `gh-pages` branch via `peaceiris/actions-gh-pages`. Once issues #1, #4, and #5 are resolved, the site will serve from `https://tanghoong.github.io/perpetual-calendars/`.
+`.github/workflows/deploy.yml` builds on every push to `main` and publishes `dist/` to the `gh-pages` branch via `peaceiris/actions-gh-pages`. Once issues #3 and #4 are resolved, the site will serve from `https://tanghoong.github.io/perpetual-calendars/`.
 
 Manual alternative:
 
@@ -200,7 +188,7 @@ npm run deploy   # runs predeploy → build, then pushes dist/ to gh-pages
 
 ## Contributing
 
-Issues and pull requests are welcome. The [Known issues](#known-issues) list is roughly in priority order — items 1–3 are small, self-contained, and unblock everyone else.
+Issues and pull requests are welcome. The [Known issues](#known-issues) list is roughly in priority order — items 1–4 are small, self-contained, and unblock everyone else.
 
 ---
 

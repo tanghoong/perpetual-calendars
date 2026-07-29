@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 
 type Language = 'en' | 'zh' | 'ms' | 'vi';
@@ -25,8 +25,7 @@ const CalendarBuilder = () => {
   const currentYear = today.getFullYear();
   const currentMonth = today.getMonth();
   const currentDate = today.getDate();
-  const currentDay = today.getDay();
-  
+
   const [year, setYear] = useState(currentYear);
   const [hoverCoords, setHoverCoords] = useState<HoverCoords>({ row: null, col: null });
   const [language, setLanguage] = useState<Language>('en');
