@@ -9,6 +9,9 @@ interface Translation {
   weekdays: string[];
   weekdaysLong: string[];
   currentYear: string;
+  prevYear: string;
+  nextYear: string;
+  languageLabel: string;
   dates: string;
   hint: string;
   hintTouch: string;
@@ -31,6 +34,9 @@ const translations: Record<Language, Translation> = {
     weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     weekdaysLong: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
     currentYear: 'Current Year',
+    prevYear: 'Previous year',
+    nextYear: 'Next year',
+    languageLabel: 'Language',
     dates: 'Dates',
     hint: 'Find the month, then the date — the weekday where they cross is your answer.',
     hintTouch: 'Tap a weekday to pin the crosshair.',
@@ -43,6 +49,9 @@ const translations: Record<Language, Translation> = {
     weekdays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
     weekdaysLong: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
     currentYear: '当前年份',
+    prevYear: '上一年',
+    nextYear: '下一年',
+    languageLabel: '语言',
     dates: '日期',
     hint: '先找月份，再找日期 — 两者交叉处就是星期。',
     hintTouch: '点击星期可固定十字线。',
@@ -54,6 +63,9 @@ const translations: Record<Language, Translation> = {
     weekdays: ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'],
     weekdaysLong: ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'],
     currentYear: 'Tahun Semasa',
+    prevYear: 'Tahun sebelumnya',
+    nextYear: 'Tahun berikutnya',
+    languageLabel: 'Bahasa',
     dates: 'Tarikh',
     hint: 'Cari bulan, kemudian tarikh — hari di persilangan itu jawapannya.',
     hintTouch: 'Ketik hari untuk menetapkan penunjuk.',
@@ -65,6 +77,9 @@ const translations: Record<Language, Translation> = {
     weekdays: ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
     weekdaysLong: ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'],
     currentYear: 'Năm Hiện Tại',
+    prevYear: 'Năm trước',
+    nextYear: 'Năm sau',
+    languageLabel: 'Ngôn ngữ',
     dates: 'Ngày',
     hint: 'Tìm tháng, rồi tìm ngày — thứ ở chỗ giao nhau là đáp án.',
     hintTouch: 'Nhấn vào thứ để ghim đường dẫn.',
@@ -125,7 +140,7 @@ const CalendarBuilder = () => {
               <button
                 onClick={() => setYear(year - 1)}
                 className="rounded-full p-1.5 text-blue-600 transition-colors hover:bg-blue-100"
-                aria-label="Previous year"
+                aria-label={t.prevYear}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
@@ -139,13 +154,16 @@ const CalendarBuilder = () => {
               <button
                 onClick={() => setYear(year + 1)}
                 className="rounded-full p-1.5 text-blue-600 transition-colors hover:bg-blue-100"
-                aria-label="Next year"
+                aria-label={t.nextYear}
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
               {!showToday && (
                 <button
                   onClick={() => setYear(currentYear)}
+                  // The text below is hidden under `sm`, so the button would
+                  // otherwise be an icon with no accessible name.
+                  aria-label={t.currentYear}
                   className="ml-1 flex items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-xs text-blue-600 transition-colors hover:bg-blue-100 sm:text-sm"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
@@ -155,7 +173,7 @@ const CalendarBuilder = () => {
             </div>
 
             <label className="flex items-center">
-              <span className="sr-only">Language</span>
+              <span className="sr-only">{t.languageLabel}</span>
               <select
                 value={language}
                 onChange={e => setLanguage(e.target.value as Language)}
