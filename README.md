@@ -6,6 +6,14 @@ A conventional calendar spends 12 separate grids to encode one fact per date: *w
 
 Built with React + TypeScript + Vite + Tailwind. Fully client-side, no backend, no date library — just `Date` and modular arithmetic.
 
+![The calendar on a desktop viewport: months grouped into seven columns by starting weekday, dates 1-31 in a block to the left, and a 7x7 weekday grid, with a hovered cell lighting its row, its column, the matching months and the matching dates](docs/one-page-calendar.png)
+
+<p align="center">
+  <img src="docs/one-page-calendar-mobile.png" alt="The same calendar on a 390px phone viewport, upright and fully legible" width="330">
+  <br>
+  <em>The same grid on a phone — upright, no rotation, no horizontal scroll.</em>
+</p>
+
 ---
 
 ## The problems it solves
@@ -67,12 +75,14 @@ Month and weekday labels switch between **English / 中文 / Melayu / Tiếng Vi
 |---|---|
 | **Any year, one grid** | Step the year with ◀ / ▶, or jump back with **Current Year**. Only the month labels re-flow. |
 | **Today, triangulated** | The current month chip, today's date, and the weekday cell where they intersect are all highlighted at once. |
-| **Crosshair tracing** | Hovering any weekday cell lights its full row and column, so you can follow a lookup without losing your place. |
+| **Crosshair tracing** | Hover or tap any weekday cell and it lights its full row and column — plus the matching months above and the matching dates to the left. The relationship the layout encodes becomes visible instead of implied. |
+| **Tap to pin** | On touch devices a tap pins the crosshair until you tap again or press **Clear**, so the lookup survives lifting your finger. Cells are also `<button>`s, so Tab and Enter work. |
 | **31-day markers** | Months with 31 days are underlined, as is date `31` — a reminder that not every column runs to the bottom. |
-| **Elapsed day numbers dimmed** | In the current year, day numbers below today's are greyed out. This is a day-of-month comparison, not a date comparison — the date block is shared by all 12 months, so it dims the 3rd of December just as readily as the 3rd of January. See #6. |
-| **Sunday in red** | Across all 7 rotations, so the weekend edge stays findable in a rotated grid. |
-| **4 languages** | English · 中文 · Melayu · Tiếng Việt, switchable live. |
-| **No dependencies for the math** | ~270 lines, native `Date` only — no moment, no date-fns, no timezone surprises. |
+| **Elapsed day numbers dimmed** | In the current year, day numbers below today's are greyed out. This is a day-of-month comparison, not a date comparison — the date block is shared by all 12 months, so it dims the 3rd of December just as readily as the 3rd of January. See #4. |
+| **Sunday in red** | Marked in every one of the seven row rotations, so the weekend edge stays findable wherever it lands. |
+| **4 languages** | English · 中文 · Melayu · Tiếng Việt, switchable live. Month lengths and the Sunday column key off indices, not translated strings, so adding a language means adding one entry. |
+| **Fits a phone** | One responsive grid from 320px up — no rotation, no horizontal scroll, no clipped labels. |
+| **No dependencies for the math** | ~315 lines, native `Date` only — no moment, no date-fns, no timezone surprises. |
 | **Static by construction** | No backend, no network calls, no storage. Builds to plain files; deploys to GitHub Pages. |
 
 ---
@@ -99,7 +109,7 @@ Open <http://localhost:5173>.
 | `npm run preview` | Serve the production build locally | ✅ works |
 | `npm run lint` | ESLint over the repo | ❌ crashes — see #1 |
 | `npm start` | Serve `dist/` via Express | ❌ fails — see #2 |
-| `npm run deploy` | `gh-pages -d dist` | ✅ works (see #3 for the base path caveat) |
+| `npm run deploy` | `gh-pages -d dist` | ✅ works |
 
 ### Project layout
 
@@ -112,11 +122,12 @@ src/
 server.js                          ← optional Express static server
 ```
 
-Everything meaningful lives in `CalendarBuilder.tsx`. The functions worth knowing:
+Everything meaningful lives in `CalendarBuilder.tsx`. The parts worth knowing:
 
-- `getMonthPositions(year)` — buckets the 12 months into 7 columns by their first weekday.
-- `generateWeekdayGrid()` — builds the 7×7 rotation block.
-- `isHighlighted()` — resolves hover crosshair vs. today's intersection.
+- `monthColumns` — seven buckets of **month indices**, keyed by the weekday each month starts on. Labels are looked up from `translations` only at render, so no logic depends on translated strings.
+- `weekdayIndex = (col + row) % 7` — the entire weekday block is this one expression; row `r` is the week rotated left by `r`.
+- `active = pinned ?? hovered` — one coordinate drives all three blocks' highlighting, which is why hovering a weekday also lights its months and dates. A pin beats a hover so touch selections survive stray pointer events.
+- The date block renders an invisible mirror of the month grid as its top padding, so both blocks stay aligned at every breakpoint without hard-coded offsets.
 
 ---
 
@@ -134,58 +145,44 @@ The lockfile resolves ESLint to 9.15 while `typescript-eslint` is pinned at `^8.
 
 ### Deployment
 
-**3. Asset paths will 404 on a project page.**
-`vite.config.ts` sets `base: '/'`, but a GitHub Pages project site serves from `/perpetual-calendars/`. Set `base: '/perpetual-calendars/'` (or derive it from `import.meta.env`). Relatedly, `package.json#homepage` is still the boilerplate placeholder `https://username.github.io/react-tailwind-boilerplate/`, and `name` is still `react-tailwind-boilerplate`.
-
-**4. The workflow needs a PAT it may not have.**
-`deploy.yml` authenticates with `secrets.PERSONAL_ACCESS_TOKEN`. The built-in `github_token: ${{ secrets.GITHUB_TOKEN }}` covers same-repo Pages deploys with no secret management — but it is not a pure drop-in: the workflow declares no `permissions` block, so on a repository whose default workflow token is read-only it still cannot push `gh-pages`. Add the grant explicitly:
-
-```yaml
-permissions:
-  contents: write
-```
-
-**5. `index.html` is unbranded.**
-Title is still `Vite + React + TS`, the favicon is `vite.svg`, and there is no description or Open Graph tag — which matters for a tool whose main distribution channel is a shared link.
+**3. The favicon is still `vite.svg`, and there are no Open Graph tags.**
+The title and description are set, but a tool distributed mainly by shared link deserves its own icon and a link preview.
 
 ### Correctness and UX
 
-**6. The date axis is month-agnostic, but two features treat it as month-specific.**
+**4. The date axis is month-agnostic, but two features treat it as month-specific.**
 The date block always shows 1–31 for every month. February (28/29) and the 30-day months aren't masked, and leap years get no indication — the reader has to supply that knowledge.
 
 The same gap makes `isPastDate()` misleading: it tests `num < currentDate`, a day-of-month comparison on cells that belong to all twelve months at once. Late in a month it dims day numbers that are still in the future for every later month, while the 29th–31st of already-elapsed months stay undimmed. `isToday()` has the same shape. Both read as "past/today" but only mean "lower-numbered than today".
 
 Dimming out-of-range and elapsed dates relative to a *hovered or selected month* would fix the month-length gap and the comparison gap together.
 
-**7. i18n logic matches on translated strings, not indices.**
-`hasThirtyOneDays()` keeps four parallel arrays of localized month names, and the Sunday-red test is a string check (`day.includes('Sun') || day.includes('周日') || day.includes('Ahd') || day === 'CN'`). Adding a fifth language means editing string lists in two more places, and any label collision across locales silently mis-renders. Both should key off the month/weekday **index**, which is already available.
+**5. Accessibility is improved but incomplete.**
+Weekday cells are now `<button>`s: keyboard reachable, `aria-pressed` reflects the pin, and each carries a full weekday name via `aria-label`. The language `<select>` has a label. What is still missing is grid semantics — the layout is CSS grid, not a table, so a screen reader is not told that a given weekday cell sits at the intersection of a date row and a month column, which is the whole point of the design. A `role="grid"` treatment with row/column headers, plus an `aria-live` readout of the current lookup, would close it. State is also still conveyed largely by colour.
 
-**8. The crosshair is hover-only.**
-`onMouseEnter`/`onMouseLeave` means touch and keyboard users get no tracing aid at all — on mobile, the single most useful interaction is simply absent. Tap-to-pin plus focus/arrow-key navigation would fix both.
-
-**9. The mobile layout is a rotation hack.**
-Below 768px the whole component is `rotate(90deg) translate(0,-100%)`, which turns the page sideways rather than reflowing. It breaks scroll direction and text selection. A responsive grid or horizontal scroll container would behave properly.
-
-**10. Accessibility gaps.**
-The grid is a `<table>` with no `<th>`, `<caption>`, or `scope` attributes, so screen readers can't announce the row/column relationship the entire design depends on. State (today, past, highlighted) is conveyed by color alone, and the language `<select>` has no associated label.
-
-**11. Nothing is persisted or shareable.**
+**6. Nothing is persisted or shareable.**
 Year and language reset on every reload. Reading them from the URL (`?year=2027&lang=zh`) and mirroring to `localStorage` would make a specific view linkable.
 
-**12. No print stylesheet.**
+**7. No print stylesheet.**
 For a calendar whose entire premise is fitting on one page, `@media print` is a conspicuous omission.
 
 ### Housekeeping
 
-**13. Boilerplate residue.** `src/App.css` still ships an unused `.spin-slow` animation; `src/assets/react.svg` and `public/vite.svg` are unused.
-**14. No tests.** The date math (`getMonthPositions`, `generateWeekdayGrid`) is pure and takes a number, returns an array — near-zero-friction to test, and it's the part that must never be wrong.
-**15. No LICENSE file.** The previous README advertised MIT, but no license file was ever committed. See [License](#license).
+**8. Boilerplate residue.** `src/App.css` still ships an unused `.spin-slow` animation; `src/assets/react.svg` and `public/vite.svg` are unused.
+**9. No tests.** The month bucketing and the weekday rotation are pure index arithmetic — trivial to extract and test, and they are the part that must never be wrong.
+**10. No LICENSE file.** The previous README advertised MIT, but no license file was ever committed. See [License](#license).
 
 ---
 
 ## Deployment
 
-`.github/workflows/deploy.yml` builds on every push to `main` and publishes `dist/` to the `gh-pages` branch via `peaceiris/actions-gh-pages`. Once issues #3 and #4 are resolved, the site will serve from `https://tanghoong.github.io/perpetual-calendars/`.
+`.github/workflows/deploy.yml` runs two jobs. `build` compiles the app and uploads `dist/` as an artifact; it runs for pushes and pull requests alike. `deploy` runs only when the ref is `main`, downloads that artifact, and publishes it to the `gh-pages` branch via `peaceiris/actions-gh-pages`, authenticating with the built-in `GITHUB_TOKEN` — no repository secret to configure.
+
+The split exists for least privilege. The workflow's default grant is `contents: read`, and only `deploy` opts into `contents: write`. Since the workflow also triggers on `pull_request`, a single-job version would hand a write-capable token to every PR build — and PR builds execute PR-controlled npm lifecycle scripts and build code. An `if` on the deploy step would not help, because the earlier steps in the same job still hold the token. The `build` job also checks out with `persist-credentials: false` so no token is left behind in `.git/config`.
+
+The site serves from `https://tanghoong.github.io/perpetual-calendars/`, which is why `vite.config.ts` sets `base: '/perpetual-calendars/'`. Changing the repository name means changing that base, or the built asset URLs will 404.
+
+One manual step remains, and it can only be done in the web UI: **Settings → Pages → Source → Deploy from a branch → `gh-pages` / root.** Until that is set, the workflow will publish the branch but GitHub will not serve it.
 
 Manual alternative:
 
@@ -197,7 +194,7 @@ npm run deploy   # runs predeploy → build, then pushes dist/ to gh-pages
 
 ## Contributing
 
-Issues and pull requests are welcome. The [Known issues](#known-issues) list is roughly in priority order — items 1–4 are small, self-contained, and unblock everyone else.
+Issues and pull requests are welcome. The [Known issues](#known-issues) list is roughly in priority order — items 1–2 are small, self-contained, and unblock everyone else.
 
 ---
 
