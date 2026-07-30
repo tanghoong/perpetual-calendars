@@ -26,3 +26,6 @@ dist-ssr
 .env
 # Local screenshot scratch (see docs/ for committed images)
 .screenshots/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
