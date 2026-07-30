@@ -101,7 +101,10 @@ const CalendarBuilder = () => {
   for (let m = 0; m < 12; m++) monthColumns[firstWeekdayOf(year, m)].push(m);
   const monthRowCount = Math.max(...monthColumns.map(col => col.length));
 
-  // A pin beats a hover, so a touch user's selection survives stray pointer events.
+  // A pin beats a hover, so a selection survives stray pointer events. `hovered`
+  // is only ever set by a real mouse or by keyboard focus — see the weekday
+  // cell's onPointerEnter. If touch were allowed to set it, unpinning would fall
+  // back to a retained synthetic hover and the crosshair would stay lit.
   const active = pinned ?? hovered;
   const showToday = year === currentYear;
   const todayCol = firstWeekdayOf(year, currentMonth);
@@ -269,8 +272,12 @@ const CalendarBuilder = () => {
                         type="button"
                         aria-pressed={isPinned}
                         aria-label={`${t.weekdaysLong[weekdayIndex]}${isPinned ? ' (pinned)' : ''}`}
-                        onMouseEnter={() => setHovered({ row, col })}
-                        onMouseLeave={() => setHovered(null)}
+                        // Mouse only. Touch browsers synthesize a hover that
+                        // persists after the tap, which would outlive an unpin.
+                        onPointerEnter={e => {
+                          if (e.pointerType === 'mouse') setHovered({ row, col });
+                        }}
+                        onPointerLeave={() => setHovered(null)}
                         onFocus={() => setHovered({ row, col })}
                         onBlur={() => setHovered(null)}
                         onClick={() => togglePin({ row, col })}
