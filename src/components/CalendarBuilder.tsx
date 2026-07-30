@@ -289,7 +289,11 @@ const CalendarBuilder = () => {
                         key={`w-${row}-${col}`}
                         type="button"
                         aria-pressed={isPinned}
-                        aria-label={`${t.weekdaysLong[weekdayIndex]}${isPinned ? ' (pinned)' : ''}`}
+                        // Name is the weekday alone. The pinned state travels on
+                        // aria-pressed, which assistive tech announces in the
+                        // user's own locale — spelling it out here would both
+                        // duplicate that and hardcode English into a localized name.
+                        aria-label={t.weekdaysLong[weekdayIndex]}
                         // Mouse only. Touch browsers synthesize a hover that
                         // persists after the tap, which would outlive an unpin.
                         onPointerEnter={e => {
