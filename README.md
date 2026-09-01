@@ -84,11 +84,12 @@ Month and weekday labels switch between **English / 中文 / Melayu / Tiếng Vi
 | **Sunday in red** | Marked in every one of the seven row rotations, so the weekend edge stays findable wherever it lands. |
 | **4 languages** | English · 中文 · Melayu · Tiếng Việt, switchable live. Month lengths and the Sunday column key off indices, not translated strings, so adding a language means adding one entry. |
 | **Mobile first, literally** | The 320px layout is the one the sizes are derived from — at that width each weekday column gets ~21px, which sets the cell metric everything else scales up from. Verified at 320/390/1024 in both appearances: zero horizontal overflow, and all 92 cells measured as exact circles. |
+| **Works backwards** | The point of the layout. Any two of month, date and weekday fix the third, and all three are selectable — so it answers *"which months is the 15th a Wednesday?"* and *"which days in September are Fridays?"*, not just *"what day is 2 September?"*. A stack of twelve month-grids can only answer those by checking twelve grids; here the answer is one lit column or row. |
 | **The title is the answer** | The page heading is the lookup itself. With nothing selected it reads today in full — *Wednesday, 2 September 2026*. Select a cell and it names exactly what that cell denotes: *January 2026 · Sunday · 4, 11, 18, 25*. Rendered through `Intl`, so month names, weekday names and field order are right in all four locales rather than hand-assembled. |
 | **Fast year jump** | The year in the stepper is a native `<select>` spanning ±60 years — on iOS that is the system wheel picker, so crossing decades is one gesture instead of forty taps. The chevrons clamp to the same bounds. |
 | **iOS design language** | Apple's published semantic colours (systemBlue, systemRed, the grouped backgrounds, the alpha label greys), SF Pro where it exists, fully rounded controls, and a segmented control for language. |
 | **Light and dark** | Full dark appearance via `prefers-color-scheme`, driven entirely by CSS custom properties — not one `dark:` variant in the markup. |
-| **No dependencies for the math** | Native `Date` only — no moment, no date-fns, no timezone surprises. |
+| **No dependencies for the math** | Native `Date` only — no moment, no date-fns, no timezone surprises. 27 tests check the arithmetic against `Date` across 60 years, including the claim the whole UI rests on: the cell at (row of date, column of month) names that date's real weekday. |
 | **SVG icons, inline** | The four glyphs are drawn to SF Symbols geometry in `icons.tsx`. No icon library, and stroke weights that match iOS rather than approximate it. |
 | **Static by construction** | No backend, no network calls, no storage. Builds to plain files; deploys to GitHub Pages. |
 
@@ -116,15 +117,21 @@ Node 20.19 or newer is required — Vite 8 drops support for anything older.
 | `npm run preview` | Serve the production build locally, at the real base path |
 | `npm run lint` | ESLint over the repo |
 | `npm run typecheck` | TypeScript, no emit |
+| `npm test` | Vitest over the date arithmetic |
 
-`lint` and `typecheck` are the two commands CI runs before it will build, so a green local run is a green PR.
+`lint`, `typecheck` and `test` are the three commands CI runs before it will build, so a green local run is a green PR.
 
 ### Project layout
 
 ```
 src/
-  components/CalendarBuilder.tsx   ← the entire app: layout, date math, i18n
+  components/CalendarBuilder.tsx   ← layout, interaction, state
   components/icons.tsx             ← inline SF-Symbols-shaped SVG glyphs
+  lib/calendar.ts                  ← the date arithmetic, as pure functions
+  lib/calendar.test.ts             ← 27 tests over it
+  lib/i18n.ts                      ← the four translation tables
+  lib/urlState.ts                  ← ?y=&lang=&m=&d=&w= round-tripping
+  lib/format.ts                    ← cached Intl formatters
   index.css                        ← iOS semantic colour tokens, light + dark
   App.tsx                          ← renders CalendarBuilder
   main.tsx                         ← React root

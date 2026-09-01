@@ -3,10 +3,12 @@ import { ArrowCounterclockwise, ChevronLeft, ChevronRight, XMark } from './icons
 import {
   columnForMonth,
   dateAt,
+  datesInRow,
   daysInMonth,
   isBeforeToday,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
+  resolveCrosshair,
   rowForDate,
   weekdayAt,
 } from '../lib/calendar';
@@ -15,25 +17,45 @@ import { LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
 import { readViewState, storeLanguage, syncUrl } from '../lib/urlState';
 
 /**
- * The selection, as the two axes the reader actually picks.
+ * The selection: month, date and weekday, each independently optional.
  *
- * The grid is month-column x date-row = weekday, and any two of the three fix
- * the third. So the whole interaction is one month and one date, each
- * independently optional:
+ * The grid is month-column x date-row = weekday, and **any two of the three fix
+ * the third**. Holding all three is what makes the reverse lookups possible —
+ * and the reverse is the thing this layout can do that a stack of twelve
+ * month-grids cannot:
  *
- *   month alone  -> a column lights up; the readout names the month's 1st
- *   date alone   -> a row lights up; the weekday is not yet determined
- *   both         -> one real date, and the crosshair meets at its weekday
+ *   month + date     -> the weekday            "what day is 2 September?"
+ *   date + weekday   -> the months             "which months is the 15th a Wednesday?"
+ *   month + weekday  -> the dates              "which days in September are Fridays?"
  *
- * Clicking a weekday cell is not a third kind of state — it is shorthand for
- * setting both at once, which is why there is no (row, col) pair here.
+ * Only two can ever be explicit, because the third is then determined. Picking
+ * a third drops the oldest, which is what `order` tracks — a most-recently-used
+ * queue of at most two axes.
  */
+type Axis = 'month' | 'date' | 'weekday';
+
 interface Selection {
   month: number | null;
   date: number | null;
+  weekday: number | null;
 }
 
-const EMPTY: Selection = { month: null, date: null };
+interface Pinned extends Selection {
+  /** Least recent first. At most two entries. */
+  order: Axis[];
+}
+
+const EMPTY: Selection = { month: null, date: null, weekday: null };
+const EMPTY_PIN: Pinned = { ...EMPTY, order: [] };
+
+/** Written out rather than computed so the value type stays `number | null`
+    instead of widening through a computed key. */
+const withAxis = (s: Pinned, axis: Axis, value: number | null): Pinned =>
+  axis === 'month'
+    ? { ...s, month: value }
+    : axis === 'date'
+      ? { ...s, date: value }
+      : { ...s, weekday: value };
 
 // Every cell is a fixed-height row box holding a square disc. The split matters:
 //
@@ -90,13 +112,27 @@ const CalendarBuilder = () => {
   );
   const [year, setYear] = useState(initial.year);
   const [language, setLanguage] = useState<Language>(initial.language);
-  const [pinned, setPinned] = useState<Selection>({ month: initial.month, date: initial.date });
+  const [pinned, setPinned] = useState<Pinned>(() => ({
+    month: initial.month,
+    date: initial.date,
+    weekday: initial.weekday,
+    order: (['month', 'date', 'weekday'] as Axis[]).filter(a => initial[a] !== null),
+  }));
   const [hovered, setHovered] = useState<Selection>(EMPTY);
 
   const t = translations[language];
 
   useEffect(() => {
-    syncUrl({ year, language, month: pinned.month, date: pinned.date }, currentYear);
+    syncUrl(
+      {
+        year,
+        language,
+        month: pinned.month,
+        date: pinned.date,
+        weekday: pinned.weekday,
+      },
+      currentYear,
+    );
   }, [year, language, pinned, currentYear]);
 
   useEffect(() => {
@@ -110,8 +146,8 @@ const CalendarBuilder = () => {
   // That is what makes "pin the month, then sweep the dates" work: the pinned
   // column stays lit while the hovered row moves.
   const activeMonth = pinned.month ?? hovered.month;
-  const activeCol = activeMonth === null ? null : columnForMonth(year, activeMonth);
-  const hasPin = pinned.month !== null || pinned.date !== null;
+  const activeWeekday = pinned.weekday ?? hovered.weekday;
+  const hasPin = pinned.order.length > 0;
 
   // Once a month is known, the date axis stops being month-agnostic: 30 and 31
   // are simply not dates in September, and 29 is not one in most Februaries.
@@ -124,29 +160,50 @@ const CalendarBuilder = () => {
   // the heading falling back to the month, which is the truth.
   const heldDate = pinned.date ?? hovered.date;
   const activeDate = heldDate !== null && heldDate <= dateLimit ? heldDate : null;
-  const activeRow = activeDate === null ? null : rowForDate(activeDate);
+
+  // Resolving the crosshair is where the third axis pays off: the answer is
+  // whichever axis was *not* picked. Resolved twice — once for what is shown
+  // (pin merged with hover) and once for the pin alone, because "is this cell
+  // already selected?" must not be answered by a hover that is, by definition,
+  // sitting on the cell being clicked.
+  const { col: activeCol, row: activeRow } = resolveCrosshair(year, {
+    month: activeMonth,
+    date: activeDate,
+    weekday: activeWeekday,
+  });
+  const pinnedCross = resolveCrosshair(year, pinned);
 
   const showToday = year === currentYear;
   const todayCol = columnForMonth(year, currentMonth);
   const todayRow = rowForDate(currentDate);
   const languageIndex = LANGUAGES.findIndex(l => l.id === language);
 
-  const toggleMonth = (month: number) =>
+  /**
+   * Sets one axis, toggling it off if it already holds this value.
+   *
+   * Two axes determine the third, so a third explicit pick would over-specify
+   * the selection — and could contradict it. Rather than refuse the click, the
+   * oldest axis is dropped, which makes the grid behave the way the reader
+   * expects: whatever you just touched is part of the question.
+   */
+  const selectAxis = (axis: Axis, value: number) =>
     setPinned(p => {
-      if (p.month === month) return { ...p, month: null };
-      // Pinning a month also drops a pinned date that month cannot have, so the
-      // pinned state stays self-consistent rather than holding an impossible
-      // pair that only looks resolved once the month is cleared again.
-      const limit = daysInMonth(year, month);
-      return { month, date: p.date !== null && p.date > limit ? null : p.date };
+      if (p[axis] === value) {
+        return withAxis({ ...p, order: p.order.filter(a => a !== axis) }, axis, null);
+      }
+      const order = [...p.order.filter(a => a !== axis), axis];
+      let next = withAxis({ ...p, order }, axis, value);
+      if (order.length > 2) {
+        next = withAxis({ ...next, order: order.slice(1) }, order[0], null);
+      }
+      // Pinning a month also drops a date that month cannot have, so the pinned
+      // state never holds an impossible pair.
+      if (next.date !== null && next.month !== null && next.date > daysInMonth(year, next.month)) {
+        next = withAxis({ ...next, order: next.order.filter(a => a !== 'date') }, 'date', null);
+      }
+      return next;
     });
-  const toggleDate = (date: number) =>
-    setPinned(p => ({ ...p, date: p.date === date ? null : date }));
 
-  // A weekday cell sets both axes at once. The month is the column's — preferring
-  // today's month when it happens to sit there, since that is the reading most
-  // likely wanted — and the date is the row's first, which is at most 7 and so
-  // valid in every month.
   const monthForColumn = (col: number): number => {
     const months = monthColumns[col];
     return showToday && months.includes(currentMonth) ? currentMonth : months[0];
@@ -158,16 +215,21 @@ const CalendarBuilder = () => {
   const selectionForCell = (row: number, col: number): Selection => ({
     month: monthForColumn(col),
     date: pinned.date !== null && rowForDate(pinned.date) === row ? pinned.date : row + 1,
+    weekday: null,
   });
-  const toggleCell = (row: number, col: number) =>
-    setPinned(p => {
-      const next = selectionForCell(row, col);
-      const alreadyHere = p.month !== null && columnForMonth(year, p.month) === col && p.date !== null && rowForDate(p.date) === row;
-      return alreadyHere ? EMPTY : next;
-    });
+  const toggleCell = (row: number, col: number) => {
+    if (pinnedCross.row === row && pinnedCross.col === col) {
+      setPinned(EMPTY_PIN);
+      return;
+    }
+    const { month, date } = selectionForCell(row, col);
+    // A cell names a month and a date, so the weekday it implies is dropped:
+    // holding all three would be over-specified.
+    setPinned({ month, date, weekday: null, order: ['month', 'date'] });
+  };
 
   const clear = () => {
-    setPinned(EMPTY);
+    setPinned(EMPTY_PIN);
     setHovered(EMPTY);
   };
 
@@ -179,20 +241,38 @@ const CalendarBuilder = () => {
   };
 
 
-  // The heading is the lookup. With both axes chosen it is a single real date —
-  // which is the whole reason the month block became selectable.
+  // The heading is the lookup, and which of the three questions it answers
+  // depends on which two axes are held. The two reverse cases are the ones a
+  // conventional calendar cannot answer without checking twelve grids.
+  const locale = LOCALES[language];
   let headline: string;
   if (activeMonth !== null && activeDate !== null) {
-    headline = formatDate(LOCALES[language], 'fullDate', new Date(year, activeMonth, activeDate));
+    // Forward: a single real date.
+    headline = formatDate(locale, 'fullDate', new Date(year, activeMonth, activeDate));
+  } else if (activeMonth !== null && activeWeekday !== null && activeRow !== null) {
+    // Reverse: every date in this month that falls on this weekday.
+    const dates = datesInRow(activeRow, dateLimit);
+    headline = `${formatDate(locale, 'monthYear', new Date(year, activeMonth, 1))} · ${
+      t.weekdaysLong[activeWeekday]
+    } · ${dates.join(', ')}`;
+  } else if (activeDate !== null && activeWeekday !== null && activeCol !== null) {
+    // Reverse: every month in which this date falls on this weekday. This is
+    // the question the whole layout is built to answer at a glance.
+    const matches = monthColumns[activeCol]
+      .filter(m => daysInMonth(year, m) >= activeDate)
+      .map(m => formatDate(locale, 'dayMonth', new Date(year, m, activeDate)));
+    headline = `${t.weekdaysLong[activeWeekday]} · ${formatList(locale, matches)}`;
   } else if (activeMonth !== null) {
     // A column *means* "months that start on this weekday", so the month's 1st
     // is the fact the column is actually asserting.
-    headline = formatDate(LOCALES[language], 'fullDate', new Date(year, activeMonth, 1));
+    headline = formatDate(locale, 'fullDate', new Date(year, activeMonth, 1));
+  } else if (activeWeekday !== null) {
+    headline = t.weekdaysLong[activeWeekday];
   } else if (activeDate !== null) {
     // A row alone cannot name a weekday — that is the missing half, so say so.
     headline = t.pickMonth;
   } else if (showToday) {
-    headline = formatDate(LOCALES[language], 'fullDate', today);
+    headline = formatDate(locale, 'fullDate', today);
   } else {
     headline = t.title;
   }
@@ -371,6 +451,10 @@ const CalendarBuilder = () => {
                       (activeMonth === null || activeMonth === currentMonth);
                     const isPast = isBeforeToday(year, activeMonth, num, today);
                     const inActiveRow = activeRow === row;
+                    // The mirror case: a month and a weekday resolve a row, and
+                    // every date in it is an answer.
+                    const answering = activeDate === null && activeRow !== null;
+                    const isAnswer = answering && inActiveRow && !outOfRange;
 
                     return (
                       <button
@@ -378,10 +462,10 @@ const CalendarBuilder = () => {
                         type="button"
                         disabled={outOfRange}
                         aria-pressed={isSelected}
-                        onPointerEnter={e => hoverIfMouse(e, { month: null, date: num })}
+                        onPointerEnter={e => hoverIfMouse(e, { ...EMPTY, date: num })}
                         onFocus={() => setHovered(s => ({ ...s, date: num }))}
                         onBlur={() => setHovered(s => ({ ...s, date: null }))}
-                        onClick={() => toggleDate(num)}
+                        onClick={() => selectAxis('date', num)}
                         className={`${CELL} group select-none focus:outline-none`}
                       >
                         <span
@@ -389,9 +473,9 @@ const CalendarBuilder = () => {
                           className={`${DISC} ${DATE_TEXT} ${CELL_FOCUS} font-medium tabular-nums ${
                             outOfRange
                               ? 'text-ios-label-3 line-through decoration-1 opacity-40'
-                              : isSelected
+                              : isSelected || isAnswer
                                 ? 'bg-ios-blue font-semibold text-white'
-                                : isToday
+                                : isToday && !answering
                                   ? 'bg-ios-blue font-semibold text-white'
                                   : inActiveRow
                                     ? 'bg-ios-blue-mid text-ios-blue'
@@ -420,6 +504,11 @@ const CalendarBuilder = () => {
                     const isSelected = activeMonth === monthIndex;
                     const isCurrent = showToday && monthIndex === currentMonth;
                     const inActiveCol = activeCol === col;
+                    // In a reverse lookup nothing was picked on this axis, so
+                    // every month in the resolved column is part of the answer
+                    // — and should read as one, not as faint context.
+                    const answering = activeMonth === null && activeCol !== null;
+                    const isAnswer = answering && inActiveCol;
 
                     return (
                       <button
@@ -430,15 +519,19 @@ const CalendarBuilder = () => {
                         // labels are abbreviations chosen to fit 12 columns, and
                         // an accessible name should be the real month name.
                         aria-label={formatDate(LOCALES[language], 'monthYear', new Date(year, monthIndex, 1))}
-                        onPointerEnter={e => hoverIfMouse(e, { month: monthIndex, date: null })}
+                        onPointerEnter={e => hoverIfMouse(e, { ...EMPTY, month: monthIndex })}
                         onFocus={() => setHovered(s => ({ ...s, month: monthIndex }))}
                         onBlur={() => setHovered(s => ({ ...s, month: null }))}
-                        onClick={() => toggleMonth(monthIndex)}
+                        onClick={() => selectAxis('month', monthIndex)}
                         className={`${CELL} group select-none focus:outline-none`}
                       >
                         <span
                           className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} overflow-hidden px-px font-semibold ${
-                            isSelected || isCurrent
+                            // While an answer set is on screen the "current
+                            // month" marker stands down: two different meanings
+                            // sharing one solid fill would read as one answer
+                            // set with a stray extra member.
+                            isSelected || isAnswer || (isCurrent && !answering)
                               ? 'bg-ios-blue text-white'
                               : inActiveCol
                                 ? 'bg-ios-blue-mid text-ios-blue'
@@ -515,6 +608,44 @@ const CalendarBuilder = () => {
             {formatList(LOCALES[language], alsoDates)}
           </p>
         )}
+
+        {/* The third axis, as its own control.
+            A weekday cell in the grid always implies a row as well, so it can
+            never express "I only care about Fridays" — which is exactly the
+            half of the lookup a conventional calendar is bad at. This row makes
+            the weekday selectable on its own, and with a date or a month held
+            the grid then resolves the *other* axis: the months where the 15th
+            is a Wednesday, or the days in September that are Fridays. */}
+        <div
+          role="group"
+          aria-label={t.weekdayLabel}
+          className="mt-3 grid grid-cols-7 gap-1 px-1"
+        >
+          {t.weekdays.map((label, weekday) => {
+            const isOn = activeWeekday === weekday;
+            return (
+              <button
+                key={weekday}
+                type="button"
+                aria-pressed={isOn}
+                aria-label={t.weekdaysLong[weekday]}
+                onPointerEnter={e => hoverIfMouse(e, { ...EMPTY, weekday })}
+                onFocus={() => setHovered(s => ({ ...s, weekday }))}
+                onBlur={() => setHovered(s => ({ ...s, weekday: null }))}
+                onClick={() => selectAxis('weekday', weekday)}
+                className={`${PRESSABLE} ${FOCUS_RING} truncate rounded-full py-1.5 text-center text-[11px] font-semibold transition-colors sm:text-[13px] ${
+                  isOn
+                    ? 'bg-ios-blue text-white'
+                    : weekday === 0
+                      ? 'bg-ios-fill text-ios-red'
+                      : 'bg-ios-fill text-ios-label-2'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         {/* iOS grouped-list footnote */}
         <p className="mt-3 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:mt-4 sm:text-[13px]">

@@ -97,3 +97,59 @@ export const isBeforeToday = (
   if (monthIndex !== today.getMonth()) return monthIndex < today.getMonth();
   return date < today.getDate();
 };
+
+/**
+ * The column whose cells show `weekday` in a given row — the inverse of
+ * {@link weekdayAt} solved for the column.
+ *
+ * This is the reverse lookup the layout exists for: "which months is the 15th a
+ * Wednesday?" is the 15th's row, this column, and the months standing in it. A
+ * stack of twelve month-grids can only answer that by checking twelve grids.
+ */
+export const columnForWeekdayInRow = (weekday: number, row: number): number =>
+  (weekday - row + 7) % 7;
+
+/**
+ * The row whose cells show `weekday` in a given column — the same inverse
+ * solved for the row instead. Answers "which dates in September are Fridays?".
+ */
+export const rowForWeekdayInColumn = (weekday: number, col: number): number =>
+  (weekday - col + 7) % 7;
+
+/** A selection of any two of the three axes. */
+export interface AxisSelection {
+  month: number | null;
+  date: number | null;
+  weekday: number | null;
+}
+
+/**
+ * Resolves a selection to the crosshair it implies.
+ *
+ * A column comes from a month directly, or from solving the grid when a date
+ * and a weekday are held instead; a row likewise. Whichever axis was *not*
+ * picked is the answer — which is why this one function serves the forward
+ * lookup and both reverse ones.
+ *
+ * Returns nulls for an axis that cannot be determined: a lone date fixes a row
+ * but no column, and a lone weekday fixes neither.
+ */
+export const resolveCrosshair = (
+  year: number,
+  { month, date, weekday }: AxisSelection,
+): { col: number | null; row: number | null } => {
+  const colFromMonth = month === null ? null : columnForMonth(year, month);
+  const rowFromDate = date === null ? null : rowForDate(date);
+  return {
+    col:
+      colFromMonth ??
+      (weekday !== null && rowFromDate !== null
+        ? columnForWeekdayInRow(weekday, rowFromDate)
+        : null),
+    row:
+      rowFromDate ??
+      (weekday !== null && colFromMonth !== null
+        ? rowForWeekdayInColumn(weekday, colFromMonth)
+        : null),
+  };
+};

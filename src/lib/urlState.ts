@@ -14,6 +14,8 @@ export interface ViewState {
   month: number | null;
   /** Selected day-of-month 1..31, or null. */
   date: number | null;
+  /** Selected weekday 0..6 (0 = Sunday), or null. */
+  weekday: number | null;
 }
 
 const LANGUAGE_KEY = 'opc:language';
@@ -48,7 +50,12 @@ export const readViewState = (
     date = null;
   }
 
-  return { year, language, month, date };
+  // Any two axes fix the third, so a link carrying all three is over-specified
+  // — probably hand-edited. Month and date are the ones that name a single real
+  // date, so they win and the weekday is dropped rather than contradicting them.
+  const weekday = month !== null && date !== null ? null : intOrNull(params.get('w'), 0, 6);
+
+  return { year, language, month, date, weekday };
 };
 
 /** Serialises the view, omitting anything at its default so a plain visit
@@ -59,6 +66,7 @@ export const toSearchParams = (state: ViewState, currentYear: number): string =>
   if (state.language !== 'en') params.set('lang', state.language);
   if (state.month !== null) params.set('m', String(state.month));
   if (state.date !== null) params.set('d', String(state.date));
+  if (state.weekday !== null) params.set('w', String(state.weekday));
   const query = params.toString();
   return query ? `?${query}` : '';
 };

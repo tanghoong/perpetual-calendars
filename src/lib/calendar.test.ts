@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   columnForMonth,
+  columnForWeekdayInRow,
   dateAt,
   datesInRow,
   daysInMonth,
@@ -10,6 +11,8 @@ import {
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
   rowForDate,
+  resolveCrosshair,
+  rowForWeekdayInColumn,
   weekdayAt,
 } from './calendar';
 
@@ -184,5 +187,110 @@ describe('isBeforeToday', () => {
   it('compares years first', () => {
     expect(isBeforeToday(2025, 11, 31, today)).toBe(true);
     expect(isBeforeToday(2027, 0, 1, today)).toBe(false);
+  });
+});
+
+describe('inverse lookups', () => {
+  it('columnForWeekdayInRow inverts weekdayAt', () => {
+    for (let weekday = 0; weekday < 7; weekday++) {
+      for (let row = 0; row < 7; row++) {
+        expect(weekdayAt(row, columnForWeekdayInRow(weekday, row))).toBe(weekday);
+      }
+    }
+  });
+
+  it('rowForWeekdayInColumn inverts weekdayAt', () => {
+    for (let weekday = 0; weekday < 7; weekday++) {
+      for (let col = 0; col < 7; col++) {
+        expect(weekdayAt(rowForWeekdayInColumn(weekday, col), col)).toBe(weekday);
+      }
+    }
+  });
+
+  it('answers "which months is date D on weekday W" correctly', () => {
+    // The headline claim of the reverse lookup, checked against Date for every
+    // year, date and weekday: the months standing in the resolved column are
+    // exactly the months where that date falls on that weekday.
+    for (const y of YEARS) {
+      const columns = monthColumnsFor(y);
+      for (let date = 1; date <= 31; date++) {
+        for (let weekday = 0; weekday < 7; weekday++) {
+          const predicted = columns[columnForWeekdayInRow(weekday, rowForDate(date))]
+            .filter(m => daysInMonth(y, m) >= date)
+            .sort((a, b) => a - b);
+          const actual = [...Array(12).keys()].filter(
+            m => daysInMonth(y, m) >= date && new Date(y, m, date).getDay() === weekday,
+          );
+          expect(predicted).toEqual(actual);
+        }
+      }
+    }
+  });
+
+  it('answers "which dates in month M are weekday W" correctly', () => {
+    for (const y of YEARS) {
+      for (let m = 0; m < 12; m++) {
+        for (let weekday = 0; weekday < 7; weekday++) {
+          const row = rowForWeekdayInColumn(weekday, columnForMonth(y, m));
+          const predicted = datesInRow(row, daysInMonth(y, m));
+          const actual: number[] = [];
+          for (let d = 1; d <= daysInMonth(y, m); d++) {
+            if (new Date(y, m, d).getDay() === weekday) actual.push(d);
+          }
+          expect(predicted).toEqual(actual);
+        }
+      }
+    }
+  });
+});
+
+describe('resolveCrosshair', () => {
+  it('resolves the forward lookup from month and date', () => {
+    for (const y of YEARS) {
+      for (let m = 0; m < 12; m++) {
+        for (let d = 1; d <= daysInMonth(y, m); d++) {
+          const { col, row } = resolveCrosshair(y, { month: m, date: d, weekday: null });
+          expect(col).not.toBeNull();
+          expect(row).not.toBeNull();
+          // The cell it lands on names the real weekday.
+          expect(weekdayAt(row!, col!)).toBe(new Date(y, m, d).getDay());
+        }
+      }
+    }
+  });
+
+  it('resolves the column from date + weekday', () => {
+    for (const y of YEARS) {
+      for (let m = 0; m < 12; m++) {
+        for (let d = 1; d <= daysInMonth(y, m); d++) {
+          const weekday = new Date(y, m, d).getDay();
+          const { col } = resolveCrosshair(y, { month: null, date: d, weekday });
+          // The month really does stand in the resolved column.
+          expect(monthColumnsFor(y)[col!]).toContain(m);
+        }
+      }
+    }
+  });
+
+  it('resolves the row from month + weekday', () => {
+    for (const y of YEARS) {
+      for (let m = 0; m < 12; m++) {
+        for (let weekday = 0; weekday < 7; weekday++) {
+          const { row } = resolveCrosshair(y, { month: m, date: null, weekday });
+          // Every date in the resolved row falls on that weekday.
+          for (const d of datesInRow(row!, daysInMonth(y, m))) {
+            expect(new Date(y, m, d).getDay()).toBe(weekday);
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves an axis null when it cannot be determined', () => {
+    expect(resolveCrosshair(2026, { month: null, date: null, weekday: null })).toEqual({ col: null, row: null });
+    // A lone date fixes the row but not the column.
+    expect(resolveCrosshair(2026, { month: null, date: 15, weekday: null })).toEqual({ col: null, row: 0 });
+    // A lone weekday fixes neither.
+    expect(resolveCrosshair(2026, { month: null, date: null, weekday: 3 })).toEqual({ col: null, row: null });
   });
 });
