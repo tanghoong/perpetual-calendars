@@ -16,6 +16,7 @@ export interface Translation {
   clear: string;
   pickMonth: string;
   alsoLabel: string;
+  weekdayLabel: string;
 }
 
 /** Segment labels: four have to fit 320px, and the endonym is what a reader
@@ -57,6 +58,7 @@ export const translations: Record<Language, Translation> = {
     clear: 'Clear',
     pickMonth: 'Now pick a month',
     alsoLabel: 'Same weekday:',
+    weekdayLabel: 'Weekday',
   },
   zh: {
     title: '单页日历',
@@ -75,6 +77,7 @@ export const translations: Record<Language, Translation> = {
     clear: '清除',
     pickMonth: '请再选择月份',
     alsoLabel: '同一星期：',
+    weekdayLabel: '星期',
   },
   ms: {
     title: 'Kalendar Satu Halaman',
@@ -92,6 +95,7 @@ export const translations: Record<Language, Translation> = {
     clear: 'Kosongkan',
     pickMonth: 'Sekarang pilih bulan',
     alsoLabel: 'Hari sama:',
+    weekdayLabel: 'Hari',
   },
   vi: {
     title: 'Lịch Một Trang',
@@ -109,5 +113,6 @@ export const translations: Record<Language, Translation> = {
     clear: 'Xóa',
     pickMonth: 'Hãy chọn tháng',
     alsoLabel: 'Cùng thứ:',
+    weekdayLabel: 'Thứ',
   },
 };
