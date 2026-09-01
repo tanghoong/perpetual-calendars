@@ -18,8 +18,6 @@ export interface ViewState {
   weekday: number | null;
 }
 
-const LANGUAGE_KEY = 'opc:language';
-
 const intOrNull = (raw: string | null, min: number, max: number): number | null => {
   if (raw === null || raw.trim() === '') return null;
   const n = Number(raw);
@@ -39,8 +37,10 @@ export const readViewState = (
   const params = new URLSearchParams(search);
   const year = intOrNull(params.get('y'), yearBounds.min, yearBounds.max) ?? currentYear;
 
+  // English is the default. The switcher is gone from the UI, but ?lang= still
+  // works, so a Chinese/Malay/Vietnamese link keeps rendering in that language.
   const fromUrl = params.get('lang');
-  const language: Language = isLanguage(fromUrl) ? fromUrl : readStoredLanguage() ?? 'en';
+  const language: Language = isLanguage(fromUrl) ? fromUrl : 'en';
 
   const month = intOrNull(params.get('m'), 0, 11);
   let date = intOrNull(params.get('d'), 1, 31);
@@ -83,25 +83,5 @@ export const syncUrl = (state: ViewState, currentYear: number): void => {
   const next = `${window.location.pathname}${query}${window.location.hash}`;
   if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
     window.history.replaceState(null, '', next);
-  }
-};
-
-/** Language is the one preference worth surviving a link that does not carry
-    it — an unlabelled visit should not send a Vietnamese reader back to
-    English every time. Storage can throw in private modes, so it is guarded. */
-export const readStoredLanguage = (): Language | null => {
-  try {
-    const raw = window.localStorage.getItem(LANGUAGE_KEY);
-    return isLanguage(raw) ? raw : null;
-  } catch {
-    return null;
-  }
-};
-
-export const storeLanguage = (language: Language): void => {
-  try {
-    window.localStorage.setItem(LANGUAGE_KEY, language);
-  } catch {
-    // Private mode, blocked storage, quota — none of which should break the app.
   }
 };

@@ -17,6 +17,10 @@ const OPTIONS = {
   weekday: { weekday: 'long' },
   /** "15 July" — no year, because the companion line shares the heading's. */
   dayMonth: { day: 'numeric', month: 'long' },
+  /** "15 Jul" — the abbreviated form, used wherever several dates are listed
+      together. Keeping those lists to one line is what stops the heading block
+      from changing height as the selection moves. */
+  dayMonthShort: { day: 'numeric', month: 'short' },
 } as const satisfies Record<string, Intl.DateTimeFormatOptions>;
 
 export type FormatKind = keyof typeof OPTIONS;
