@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # The app's own dependencies. Grouped so a React or Vite bump arrives as one
+  # reviewable PR instead of one per package.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      react:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
+      vite:
+        patterns: ['vite', '@vitejs/*', '@tailwindcss/*', 'tailwindcss']
+      lint:
+        patterns: ['eslint', '@eslint/*', 'eslint-plugin-*', 'typescript-eslint', 'globals']
+      minor-and-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # Actions are pinned to major tags, so this is what moves them across majors
+  # and picks up security fixes in the tags themselves.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ['*']

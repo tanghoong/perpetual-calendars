@@ -2,72 +2,92 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
-# Read-only by default. Only the deploy job below opts into write, so pull
-# request builds — which run PR-controlled npm lifecycle scripts and build
-# code — never hold a token that can push to the repository.
-permissions:
-  contents: read
+# Deny by default. Each job below opts into exactly the scopes it needs, so a
+# pull request build — which runs PR-controlled npm lifecycle scripts and build
+# code — never holds a token that can publish or write to the repository.
+permissions: {}
+
+# A superseded deploy is worth cancelling; a half-finished one is not, so
+# in-flight runs finish rather than leave Pages mid-publish.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: false
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
-        cache: 'npm'
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
 
-    - name: Install dependencies
-      run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Build project
-      run: npm run build
-      env:
-        CI: true
+      - name: Lint
+        run: npm run lint
 
-    - name: Upload build output
-      uses: actions/upload-artifact@v4
-      with:
-        name: dist
-        path: dist
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Resolves the repository's own Pages base path (`/perpetual-calendars/`
+      # for a project site, `/` for a user site) and exposes it as
+      # steps.pages.outputs.base_path, so a fork or a rename needs no code edit.
+      - name: Configure Pages
+        id: pages
+        # Skipped on pull requests: a PR token cannot read the Pages config, and
+        # the base path does not change whether the build succeeds. vite.config.ts
+        # falls back to its literal when this output is absent.
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v6
+
+      - name: Build
+        run: npm run build
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
 
   deploy:
+    name: Deploy
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
-    # Scoped to this job so the write-capable token exists only here, where
-    # the only thing that runs is the publish action.
+    # Scoped to this job so the publish-capable token exists only here, where
+    # the only thing that runs is the deploy action itself.
     permissions:
-      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-    - name: Download build output
-      uses: actions/download-artifact@v4
-      with:
-        name: dist
-        path: dist
-
-    - name: Publish to gh-pages
-      uses: peaceiris/actions-gh-pages@v3
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./dist
-        publish_branch: gh-pages
-        commit_message: "Deploy to GitHub Pages: ${{ github.event.head_commit.message || github.sha }}"
-        user_name: 'github-actions[bot]'
-        user_email: 'github-actions[bot]@users.noreply.github.com'
-        force_orphan: true
-        enable_jekyll: false
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,12 +1,7 @@
 import CalendarBuilder from './components/CalendarBuilder'
-import './App.css'
 
 function App() {
-  return (
-    <div>
-      <CalendarBuilder />
-    </div>
-  )
+  return <CalendarBuilder />
 }
 
 export default App

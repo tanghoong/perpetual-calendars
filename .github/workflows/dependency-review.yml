@@ -1,0 +1,31 @@
+name: Dependency Review
+
+# Fails a pull request that would add a dependency with a known vulnerability
+# or a disallowed licence — the check that catches a bad package before it is
+# merged, rather than after Dependabot notices it in main.
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  review:
+    name: Review dependency changes
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Review dependencies
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: moderate
+          comment-summary-in-pr: on-failure

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="One Page Calendar">
+  <!-- The app's whole idea as a mark: one row and one column crossing, with the
+       answer at the intersection. Reads at 16px because it is three shapes,
+       not a drawing of a calendar. -->
+  <rect width="64" height="64" rx="15" fill="#007AFF"/>
+  <g fill="#FFFFFF">
+    <rect x="9" y="28" width="46" height="8" rx="4" opacity=".45"/>
+    <rect x="28" y="9" width="8" height="46" rx="4" opacity=".45"/>
+    <rect x="25" y="25" width="14" height="14" rx="7"/>
+  </g>
+</svg>
