@@ -13,8 +13,8 @@ import {
   weekdayAt,
 } from '../lib/calendar';
 import { formatDate, formatList } from '../lib/format';
-import { LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
-import { readViewState, storeLanguage, syncUrl } from '../lib/urlState';
+import { LOCALES, translations } from '../lib/i18n';
+import { readViewState, syncUrl } from '../lib/urlState';
 
 /**
  * The selection: month, date and weekday, each independently optional.
@@ -111,7 +111,9 @@ const CalendarBuilder = () => {
     readViewState(window.location.search, currentYear, YEAR_BOUNDS),
   );
   const [year, setYear] = useState(initial.year);
-  const [language, setLanguage] = useState<Language>(initial.language);
+  // Read from ?lang= once and then held constant: the switcher is gone from the
+  // UI, so nothing can change it during a session.
+  const language = initial.language;
   const [pinned, setPinned] = useState<Pinned>(() => ({
     month: initial.month,
     date: initial.date,
@@ -134,10 +136,6 @@ const CalendarBuilder = () => {
       currentYear,
     );
   }, [year, language, pinned, currentYear]);
-
-  useEffect(() => {
-    storeLanguage(language);
-  }, [language]);
 
   const monthColumns = useMemo(() => monthColumnsFor(year), [year]);
   const monthRowCount = Math.max(...monthColumns.map(col => col.length));
@@ -176,7 +174,6 @@ const CalendarBuilder = () => {
   const showToday = year === currentYear;
   const todayCol = columnForMonth(year, currentMonth);
   const todayRow = rowForDate(currentDate);
-  const languageIndex = LANGUAGES.findIndex(l => l.id === language);
 
   /**
    * Sets one axis, toggling it off if it already holds this value.
@@ -233,6 +230,43 @@ const CalendarBuilder = () => {
     setHovered(EMPTY);
   };
 
+  /**
+   * Shortcuts: the questions worth one tap.
+   *
+   * Deliberately culture-neutral — a hardcoded Christmas would be noise for
+   * three of the four languages this ships in. "Friday the 13th" earns its
+   * place by being the reverse lookup in its purest form: a date and a weekday,
+   * answered by a set of months, which is the query a conventional calendar is
+   * worst at.
+   */
+  const presets: { key: string; label: string; apply: () => void }[] = [
+    {
+      key: 'today',
+      label: t.todayLabel,
+      apply: () => {
+        setYear(currentYear);
+        setPinned({
+          month: currentMonth,
+          date: currentDate,
+          weekday: null,
+          order: ['month', 'date'],
+        });
+      },
+    },
+    {
+      key: 'friday13',
+      label: `${t.weekdaysLong[5]} 13`,
+      apply: () => setPinned({ month: null, date: 13, weekday: 5, order: ['date', 'weekday'] }),
+    },
+    {
+      key: 'newyear',
+      // Formatted rather than translated: Intl already knows what 1 January is
+      // called in every locale here.
+      label: formatDate(LOCALES[language], 'dayMonthShort', new Date(year, 0, 1)),
+      apply: () => setPinned({ month: 0, date: 1, weekday: null, order: ['month', 'date'] }),
+    },
+  ];
+
   // Mouse only. Touch browsers synthesize a hover that persists after the tap,
   // which would outlive an unpin and leave the crosshair lit with nothing
   // selected.
@@ -260,7 +294,7 @@ const CalendarBuilder = () => {
     // the question the whole layout is built to answer at a glance.
     const matches = monthColumns[activeCol]
       .filter(m => daysInMonth(year, m) >= activeDate)
-      .map(m => formatDate(locale, 'dayMonth', new Date(year, m, activeDate)));
+      .map(m => formatDate(locale, 'dayMonthShort', new Date(year, m, activeDate)));
     headline = `${t.weekdaysLong[activeWeekday]} · ${formatList(locale, matches)}`;
   } else if (activeMonth !== null) {
     // A column *means* "months that start on this weekday", so the month's 1st
@@ -286,7 +320,7 @@ const CalendarBuilder = () => {
     activeMonth !== null && activeDate !== null && activeCol !== null
       ? monthColumns[activeCol]
           .filter(m => m !== activeMonth && daysInMonth(year, m) >= activeDate)
-          .map(m => formatDate(LOCALES[language], 'dayMonth', new Date(year, m, activeDate)))
+          .map(m => formatDate(LOCALES[language], 'dayMonthShort', new Date(year, m, activeDate)))
       : [];
 
   return (
@@ -295,19 +329,45 @@ const CalendarBuilder = () => {
           width is what the grid has to fit into. The safe-area insets keep the
           title clear of a notch and the footer clear of the home indicator when
           this is saved to the Home Screen. */}
-      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5">
+      {/* One column on phones, two from `lg`. The desktop layout exists because
+          a phone-width column centred in a 1440px window wastes both margins:
+          the controls move into a left rail and the grid takes the space it
+          frees, so the whole lookup is visible without scrolling. Placement is
+          grid areas rather than duplicated markup, so the DOM order — and with
+          it the tab order and the screen-reader order — stays the reading
+          order at every width. */}
+      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4">
         {/* aria-live announces the resolved date as focus moves through the
             grid, which is what turns the crosshair into something a screen
             reader can follow. min-h reserves two lines so stepping between
             cells does not shunt the page up and down under the reader's thumb. */}
-        <h1
-          aria-live="polite"
-          className="min-h-[2.5em] text-[18px] font-bold leading-tight tracking-[-0.015em] tabular-nums sm:text-[26px]"
-        >
-          {headline}
-        </h1>
+        {/* One block, one reserved height, for the whole readout.
+            The companion line used to sit below the card, so it pushed the
+            weekday row and the footnote down by ~27px every time it appeared —
+            and on hover it appears and disappears constantly. Folding it into
+            the heading's reserved space means nothing below the heading ever
+            moves.
 
-        <div className="mt-3 flex items-center justify-between gap-2">
+            The reservations are measured, not guessed: the tallest real content
+            across all four languages and every selection state is 45px at the
+            base size, 65px at `sm` (Vietnamese, three-month reverse lookup) and
+            57px at `lg`. Each holds a few pixels of slack over that. */}
+        <div
+          aria-live="polite"
+          className="flex min-h-12 flex-col justify-start sm:min-h-[4.5rem] lg:col-span-2 lg:min-h-16"
+        >
+          <h1 className="text-[18px] font-bold leading-tight tracking-[-0.015em] tabular-nums sm:text-[26px]">
+            {headline}
+          </h1>
+          {alsoDates.length > 0 && (
+            <p className="mt-1.5 text-[12px] leading-snug text-ios-label-2 sm:text-[13px]">
+              <span className="font-semibold text-ios-label-3">{t.alsoLabel}</span>{' '}
+              {formatList(LOCALES[language], alsoDates)}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 lg:col-start-1 lg:row-start-2 lg:mt-0">
           {/* Year stepper, shaped like an iOS stepper: one filled pill track
               carrying two round glyph buttons with the value between them. The
               value is itself a <select> — a native picker is the fast path off
@@ -375,43 +435,45 @@ const CalendarBuilder = () => {
           </div>
         </div>
 
-        {/* Language, as an iOS segmented control. Built on real radio inputs
-            rather than ARIA: a native radio group already carries grouped
-            semantics and arrow-key navigation, which a set of aria-pressed
-            buttons would have to reimplement — and usually reimplements wrong. */}
-        <fieldset className="relative mt-3 flex rounded-full bg-ios-fill p-1">
-          <legend className="sr-only">{t.languageLabel}</legend>
-          <div
-            aria-hidden="true"
-            className="absolute inset-y-1 left-1 rounded-full bg-ios-thumb shadow-sm transition-transform duration-300 ease-out motion-reduce:transition-none"
-            style={{
-              width: `calc((100% - 0.5rem) / ${LANGUAGES.length})`,
-              transform: `translateX(${languageIndex * 100}%)`,
-            }}
-          />
-          {LANGUAGES.map(({ id, short }) => (
-            <label
-              key={id}
-              className={`${PRESSABLE} relative z-10 flex-1 cursor-pointer rounded-full py-1.5 text-center text-[13px] font-semibold has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ios-blue ${
-                language === id ? 'text-ios-label' : 'text-ios-label-2'
-              }`}
-            >
-              <input
-                type="radio"
-                name="language"
-                value={id}
-                checked={language === id}
-                onChange={() => setLanguage(id)}
-                className="sr-only"
-              />
-              {short}
-            </label>
-          ))}
-        </fieldset>
+        {/* The third axis, in the slot the language switcher used to occupy.
+            A weekday cell inside the grid always implies a row as well, so it
+            can never express "I only care about Fridays" — the half of the
+            lookup a conventional calendar is worst at. Sitting directly above
+            the grid, it now reads as what it is: a filter on the whole board. */}
+        <div
+          role="group"
+          aria-label={t.weekdayLabel}
+          className="mt-3 grid grid-cols-7 gap-1 lg:col-start-1 lg:row-start-3 lg:mt-0 lg:grid-cols-4"
+        >
+          {t.weekdays.map((label, weekday) => {
+            const isOn = activeWeekday === weekday;
+            return (
+              <button
+                key={weekday}
+                type="button"
+                aria-pressed={isOn}
+                aria-label={t.weekdaysLong[weekday]}
+                onPointerEnter={e => hoverIfMouse(e, { ...EMPTY, weekday })}
+                onFocus={() => setHovered(s => ({ ...s, weekday }))}
+                onBlur={() => setHovered(s => ({ ...s, weekday: null }))}
+                onClick={() => selectAxis('weekday', weekday)}
+                className={`${PRESSABLE} ${FOCUS_RING} truncate rounded-full py-1.5 text-center text-[11px] font-semibold transition-colors sm:text-[13px] ${
+                  isOn
+                    ? 'bg-ios-blue text-white'
+                    : weekday === 0
+                      ? 'bg-ios-fill text-ios-red'
+                      : 'bg-ios-fill text-ios-label-2'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
         {/* Grouped-content card */}
         <div
-          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4"
+          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-4 lg:mt-0"
           onPointerLeave={() => setHovered(EMPTY)}
         >
           {/* Two blocks side by side, sized 5:7 to match their column counts.
@@ -602,55 +664,28 @@ const CalendarBuilder = () => {
           </div>
         </div>
 
-        {alsoDates.length > 0 && (
-          <p className="mt-2 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:text-[13px]">
-            <span className="font-semibold text-ios-label-3">{t.alsoLabel}</span>{' '}
-            {formatList(LOCALES[language], alsoDates)}
-          </p>
-        )}
-
-        {/* The third axis, as its own control.
-            A weekday cell in the grid always implies a row as well, so it can
-            never express "I only care about Fridays" — which is exactly the
-            half of the lookup a conventional calendar is bad at. This row makes
-            the weekday selectable on its own, and with a date or a month held
-            the grid then resolves the *other* axis: the months where the 15th
-            is a Wednesday, or the days in September that are Fridays. */}
-        <div
-          role="group"
-          aria-label={t.weekdayLabel}
-          className="mt-3 grid grid-cols-7 gap-1 px-1"
-        >
-          {t.weekdays.map((label, weekday) => {
-            const isOn = activeWeekday === weekday;
-            return (
-              <button
-                key={weekday}
-                type="button"
-                aria-pressed={isOn}
-                aria-label={t.weekdaysLong[weekday]}
-                onPointerEnter={e => hoverIfMouse(e, { ...EMPTY, weekday })}
-                onFocus={() => setHovered(s => ({ ...s, weekday }))}
-                onBlur={() => setHovered(s => ({ ...s, weekday: null }))}
-                onClick={() => selectAxis('weekday', weekday)}
-                className={`${PRESSABLE} ${FOCUS_RING} truncate rounded-full py-1.5 text-center text-[11px] font-semibold transition-colors sm:text-[13px] ${
-                  isOn
-                    ? 'bg-ios-blue text-white'
-                    : weekday === 0
-                      ? 'bg-ios-fill text-ios-red'
-                      : 'bg-ios-fill text-ios-label-2'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+        {/* Shortcuts sit with the other controls: below the grid on a phone,
+            in the left rail on desktop. Placed before the footnote in the DOM so
+            the reading order matches the visual order at both widths. */}
+        <div role="group" aria-label={t.presetsLabel} className="mt-3 flex flex-wrap gap-2 px-1 lg:col-start-1 lg:row-start-4 lg:mt-0">
+          {presets.map(({ key, label, apply }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={apply}
+              className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* iOS grouped-list footnote */}
-        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:mt-4 sm:text-[13px]">
+        {/* iOS grouped-list footnote. Clear used to live here; it moved to the
+            header, so this is now purely the instruction. */}
+        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:mt-4 sm:text-[13px] lg:col-start-1 lg:row-start-5 lg:mt-0">
           {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
         </p>
+
       </div>
     </div>
   );
