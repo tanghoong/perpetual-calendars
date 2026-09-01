@@ -1,3 +1,89 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* iOS semantic colours, light appearance. These are Apple's published system
+   values, not approximations — systemBlue, systemRed, the grouped backgrounds,
+   and the label greys (which are alpha over the background, so they stay
+   legible on white and on the grouped grey alike). */
+@theme {
+  --color-ios-bg: #f2f2f7;
+  --color-ios-card: #ffffff;
+  --color-ios-blue: #007aff;
+  --color-ios-blue-soft: rgb(0 122 255 / 0.12);
+  --color-ios-blue-mid: rgb(0 122 255 / 0.26);
+  --color-ios-red: #ff3b30;
+  --color-ios-label: #000000;
+  --color-ios-label-2: rgb(60 60 67 / 0.6);
+  --color-ios-label-3: rgb(60 60 67 / 0.3);
+  --color-ios-fill: rgb(120 120 128 / 0.16);
+  /* The selected segment of a segmented control. Not the card colour: in dark
+     mode iOS lifts the thumb *above* the track rather than cutting into it, so
+     this has to be lighter than --color-ios-fill in both appearances. */
+  --color-ios-thumb: #ffffff;
+
+  /* SF Pro on Apple hardware, the platform UI face everywhere else. The CJK
+     faces are listed explicitly because the Latin fallbacks do not carry those
+     glyphs and the browser default is a serif on some systems. */
+  --font-ios:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display',
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Helvetica Neue',
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+/* Dark appearance. Written as a plain :root override rather than a second
+   @theme block: @theme lands in Tailwind's `theme` layer, and unlayered rules
+   outrank layered ones, so these win regardless of source order. The utilities
+   resolve through var(), so every `bg-ios-card` and `text-ios-label` follows
+   without a single `dark:` variant in the markup.
+
+   Dark is not light inverted. systemBlue and systemRed both shift lighter to
+   hold contrast against black, and the label greys switch to a warm-white
+   alpha. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ios-bg: #000000;
+    --color-ios-card: #1c1c1e;
+    --color-ios-blue: #0a84ff;
+    --color-ios-blue-soft: rgb(10 132 255 / 0.22);
+    --color-ios-blue-mid: rgb(10 132 255 / 0.42);
+    --color-ios-red: #ff453b;
+    --color-ios-label: #ffffff;
+    --color-ios-label-2: rgb(235 235 245 / 0.6);
+    --color-ios-label-3: rgb(235 235 245 / 0.3);
+    --color-ios-fill: rgb(118 118 128 / 0.24);
+    --color-ios-thumb: #636366;
+  }
+}
+
+:root {
+  /* Lets the browser paint form controls, scrollbars and the overscroll
+     gutter in the matching appearance. */
+  color-scheme: light dark;
+}
+
+/* The native <select> popup inherits its foreground and background from the
+   control. The year picker sits inside a filled pill, so the control itself is
+   transparent — which left the popup falling back to the browser's default
+   white while the text stayed the dark-appearance white. White on white: the
+   list was invisible except for whichever row the hover bar was over.
+
+   So the options have to carry their own colours. The foreground is pinned to
+   the label colour rather than inherited, because the control turns systemBlue
+   while it is showing the current year, and a list of 121 years should read
+   uniformly regardless of what the closed control looks like.
+
+   iOS Safari ignores option styling entirely and opens its own wheel picker,
+   which follows color-scheme instead — which is why :root declares it. */
+select option {
+  background-color: var(--color-ios-card);
+  color: var(--color-ios-label);
+}
+
+body {
+  /* Explicit rather than inherited from the app shell, so an overscroll bounce
+     past the content shows the grouped background instead of the browser
+     canvas. */
+  background-color: var(--color-ios-bg);
+
+  /* iOS never shows the blue tap flash on its own controls. */
+  -webkit-tap-highlight-color: transparent;
+}

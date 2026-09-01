@@ -2,10 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
+    <!-- viewport-fit=cover hands the notch and home-indicator insets to CSS,
+         which the layout consumes via env(safe-area-inset-*). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
     <title>One Page Calendar</title>
+    <meta name="description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
+
+    <!-- Tells the browser the page ships both appearances, so it paints the
+         chrome and the overscroll gutter to match instead of flashing white. -->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F2F2F7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000" />
+
+    <!-- Saved to the Home Screen, this runs chromeless with a transparent
+         status bar sitting over the page. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Calendar" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="One Page Calendar" />
+    <meta property="og:description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
+    <meta name="twitter:card" content="summary" />
   </head>
   <body>
     <div id="root"></div>
