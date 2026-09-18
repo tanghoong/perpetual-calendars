@@ -5,13 +5,17 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-// GitHub Pages serves this project site from a subpath, so built asset URLs
-// have to carry that prefix or they 404. CI passes the repository's real base
-// path in BASE_PATH (see .github/workflows/deploy.yml), which keeps forks and
-// renames working without a code edit; the literal is the local fallback.
+// Built asset URLs have to carry whatever prefix the site is served from, or
+// they 404. CI passes the real one in BASE_PATH (see
+// .github/workflows/deploy.yml), which keeps a fork or a rename working with no
+// code edit; the literal is only the local fallback.
+//
+// It is `/` because the site serves from the root of cal.tanghoong.com. On a
+// github.io project site it would be `/perpetual-calendars/`, and a fork that
+// has not set up a custom domain still gets that — from CI, not from here.
 // `||` rather than `??` on purpose: an unset step output arrives as '', not
 // undefined, and an empty base would emit root-relative URLs.
-const rawBase = process.env.BASE_PATH || '/perpetual-calendars/'
+const rawBase = process.env.BASE_PATH || '/'
 const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
 
 // Open Graph and Twitter card images must be absolute URLs — crawlers fetch
@@ -19,12 +23,18 @@ const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`
 // not enough. CI supplies the full origin from the same configure-pages step
 // that supplies BASE_PATH; the literal is the local fallback, matching
 // package.json's `homepage`. Trailing slash stripped so the template can own it.
-const siteUrl = (process.env.SITE_URL || 'https://tanghoong.github.io/perpetual-calendars/').replace(
-  /\/+$/,
-  '',
-)
+const siteUrl = (process.env.SITE_URL || 'https://cal.tanghoong.com/').replace(/\/+$/, '')
 
-/** Every file under `public/`, as the paths they are served at. */
+/**
+ * Files the service worker should precache, as the paths they are served at.
+ *
+ * `CNAME` is excluded: it is how GitHub Pages is told which custom domain to
+ * answer on, not something the app ever fetches, so caching it would only
+ * lengthen the install. Its *contents* still feed the cache version, because it
+ * is hashed with the rest of the build — a domain change should invalidate.
+ */
+const PRECACHE_EXCLUDED = new Set(['CNAME'])
+
 const publicFiles = (dir: string, root = dir): string[] =>
   readdirSync(dir).flatMap(entry => {
     const full = join(dir, entry)
@@ -60,10 +70,11 @@ const serviceWorker = (): Plugin => ({
     const hashed = Object.keys(bundle)
     // Stable names, so their contents have to be hashed explicitly.
     const stable = ['index.html', ...publicFiles('public')]
+    const cacheable = stable.filter(f => !PRECACHE_EXCLUDED.has(f))
 
     // Stable order, so an unchanged build produces an unchanged cache name and
     // returning visitors are not handed a pointless re-download.
-    const urls = [...new Set(['', ...stable, ...hashed].map(p => base + p))].sort()
+    const urls = [...new Set(['', ...cacheable, ...hashed].map(p => base + p))].sort()
 
     // Hashing the URL list alone was not enough, and the gap was invisible from
     // the outside: index.html and everything in public/ keep the same filename

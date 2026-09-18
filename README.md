@@ -79,7 +79,7 @@ Month and weekday labels switch between **English / 中文 / Melayu / Tiếng Vi
 
 | | |
 |---|---|
-| **Any year, one grid** | Step the year with ◀ / ▶, jump back with **Current Year**, or pick one of the same-grid years below. Only the month labels re-flow. |
+| **Any year, one grid** | Step the year with ◀ / ▶, drag the grid sideways, pick one of the same-grid years below, or jump back with **Today**. Only the month labels re-flow. |
 | **Today, triangulated** | The current month, today's date, and the weekday cell where they intersect are all marked at once — with an outline, not a fill. A fill is what a selection uses, and the two mean different things: selecting the 13th used to put two identical blue squares on screen, one meaning *the answer* and one meaning *today*. |
 | **Crosshair tracing** | Hover or tap any weekday cell and it lights its full row and column — plus the matching months above and the matching dates to the left. The cells are square and the grids have no gaps, so a lit row and column read as one continuous band meeting at a single filled square, rounded at its four outer tips and square everywhere the arms cross. That is the relationship the layout encodes, drawn rather than implied; circles could only ever meet at a point. |
 | **Tap to pin** | On touch devices a tap pins the crosshair until you tap again or press **Clear**, so the lookup survives lifting your finger. Cells are also `<button>`s, so Enter works — and the weekday block is one tab stop with arrow keys inside it, not 49. |
@@ -248,17 +248,32 @@ still hold the token. Only `deploy` can publish, and nothing PR-controlled runs
 there. Every checkout also uses `persist-credentials: false`, so no token is
 left behind in `.git/config`.
 
-### The base path
+### The domain and the base path
 
-The site serves from `https://tanghoong.github.io/perpetual-calendars/`, so the
-built asset URLs need that prefix or they 404. `vite.config.ts` reads it from
-`BASE_PATH`, which CI supplies from `actions/configure-pages` — that action
-resolves the repository's *actual* Pages base path, so a fork or a rename keeps
-working with no code edit. The literal `/perpetual-calendars/` in
-`vite.config.ts` is only the local fallback.
+The site serves from **<https://cal.tanghoong.com>**, a custom domain on GitHub
+Pages. `public/CNAME` carries it into the published artifact; the matching DNS
+record is a `CNAME` on the `cal` host pointing at `tanghoong.github.io.` — a
+subdomain wants a CNAME record, not the `A`/`AAAA` records an apex domain needs.
+
+Built asset URLs have to carry whatever path the site is served from, or they
+404. `vite.config.ts` reads it from `BASE_PATH`, which CI supplies from
+`actions/configure-pages` — that action resolves the site's *actual* base path,
+so this needed **no code change** when the domain moved: a custom domain serves
+from the root, and `configure-pages` simply started reporting `/` instead of
+`/perpetual-calendars/`. It supplies the absolute origin the same way, through
+`SITE_URL`, which is what `og:image` needs. The literals in `vite.config.ts` are
+only the local fallback, and a fork with no custom domain still gets its own
+`/<repo>/` prefix from CI.
 
 `npm run preview` honours the same base, so the local production check hits the
 same URLs the deployed site does.
+
+**A note for anyone moving the domain again.** A 301 from the old address never
+reaches a returning visitor, because the service worker answers navigations from
+its cache before the network. They stay pinned to the old origin indefinitely.
+Unsticking them needs a final build published to the *old* address whose only
+job is to unregister the worker and clear its caches. Moving early, before
+anyone has visited, costs nothing; moving later does not.
 
 ### One-time repository setup
 
@@ -269,16 +284,22 @@ These cannot be done from files. In the repository's web UI:
    "Deploy from a branch". If this repo was previously deploying from a
    `gh-pages` branch, this switch is the migration — after it, the old branch
    is dead weight and can be deleted.
-2. **Settings → Code security → enable** Dependabot alerts, Dependabot security
+2. **DNS, then Settings → Pages → Custom domain → `cal.tanghoong.com`.** The
+   DNS record goes in first, or GitHub's check fails: a `CNAME` on the `cal`
+   host pointing at `tanghoong.github.io.` Once the certificate finishes
+   provisioning, tick **Enforce HTTPS**. `public/CNAME` already carries the
+   domain into the artifact, so the setting and the file agree.
+3. **Settings → Code security → enable** Dependabot alerts, Dependabot security
    updates, secret scanning, and push protection.
-3. **Settings → Code security → Private vulnerability reporting → enable**, so
+4. **Settings → Code security → Private vulnerability reporting → enable**, so
    `SECURITY.md` has a working channel to point at.
-4. **Settings → Rules → Rulesets** — protect `main`: require a pull request,
+5. **Settings → Rules → Rulesets** — protect `main`: require a pull request,
    and require the `Build`, `Analyze JavaScript/TypeScript`, and
    `Review dependency changes` checks to pass.
 
-Step 1 is required for the site to deploy at all. Steps 2–4 are what make the
-security workflows enforcing rather than advisory.
+Step 1 is required for the site to deploy at all, and step 2 for it to answer on
+its own domain. Steps 3–5 are what make the security workflows enforcing rather
+than advisory.
 
 ---
 

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "homepage": "https://tanghoong.github.io/perpetual-calendars/",
+  "homepage": "https://cal.tanghoong.com/",
   "engines": {
     "node": ">=20.19"
   },

@@ -50,9 +50,10 @@ jobs:
       - name: Test
         run: npm test
 
-      # Resolves the repository's own Pages base path (`/perpetual-calendars/`
-      # for a project site, `/` for a user site) and exposes it as
-      # steps.pages.outputs.base_path, so a fork or a rename needs no code edit.
+      # Resolves the site's own Pages base path — `/` here, because a custom
+      # domain serves from the root, and `/perpetual-calendars/` for a fork that
+      # has not set one up — and exposes it as steps.pages.outputs.base_path, so
+      # a fork, a rename or a domain change needs no code edit.
       - name: Configure Pages
         id: pages
         # Skipped on pull requests: a PR token cannot read the Pages config, and
