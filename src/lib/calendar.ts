@@ -171,6 +171,32 @@ export const sameGridYears = (
 };
 
 /**
+ * The year closest to `from` that renders a given type's grid.
+ *
+ * What a type picker needs: a type is a shape, but everything else in this app
+ * is keyed by year, so choosing a shape has to land on a concrete year. Walks
+ * outward from `from` and prefers the future on a tie, because "the next year
+ * that looks like this" is the more useful of two equally-close answers.
+ *
+ * Returns null only if the range holds no year of that type at all, which takes
+ * a range narrower than 40 years to arrange.
+ */
+export const nearestYearOfType = (
+  type: number,
+  from: number,
+  min: number,
+  max: number,
+): number | null => {
+  for (let step = 0; step <= max - min; step++) {
+    const later = from + step;
+    if (later <= max && calendarTypeOf(later) === type) return later;
+    const earlier = from - step;
+    if (earlier >= min && calendarTypeOf(earlier) === type) return earlier;
+  }
+  return null;
+};
+
+/**
  * Every year in a range where a given date falls on a given weekday.
  *
  * The fourth reverse lookup — "which years is my birthday a Saturday?" — and the

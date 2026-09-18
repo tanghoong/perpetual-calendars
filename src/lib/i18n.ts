@@ -45,6 +45,14 @@ export interface Translation {
   worked: string;
   /** What the underline under a month (and under 31) means. */
   markerNote: string;
+  /** The fourteen-type browser, and the gesture that drives the year. */
+  allTypes: string;
+  allTypesNote: string;
+  commonYears: string;
+  leapYears: string;
+  swipeHint: string;
+  /** Leads the tappable examples inside the explainer. */
+  tryIt: string;
   /** Accessible names for the three blocks, once they carry grid semantics. */
   monthsLabel: string;
   weekdayGridLabel: string;
@@ -121,6 +129,12 @@ export const translations: Record<Language, Translation> = {
     stepCross: 'The weekday where they cross is the answer.',
     worked: 'For example',
     markerNote: 'An underline marks a month with 31 days — and the 31st itself.',
+    allTypes: 'All fourteen',
+    allTypesNote: 'Every year that has ever been, or will be, is one of these.',
+    commonYears: 'Common years',
+    leapYears: 'Leap years',
+    swipeHint: 'Drag the grid sideways to change the year.',
+    tryIt: 'Try',
     monthsLabel: 'Months',
     weekdayGridLabel: 'Weekdays',
     dateGridLabel: 'Dates',
@@ -162,6 +176,12 @@ export const translations: Record<Language, Translation> = {
     stepCross: '行列交叉处的星期就是答案。',
     worked: '例如',
     markerNote: '下划线表示这个月有 31 天 — 日期栏的 31 同理。',
+    allTypes: '全部十四种',
+    allTypesNote: '古往今来的每一年，都是这十四种版面之一。',
+    commonYears: '平年',
+    leapYears: '闰年',
+    swipeHint: '左右拖动表格即可切换年份。',
+    tryIt: '试试',
     monthsLabel: '月份',
     weekdayGridLabel: '星期',
     dateGridLabel: '日期',
@@ -202,6 +222,12 @@ export const translations: Record<Language, Translation> = {
     stepCross: 'Hari di tempat keduanya bersilang ialah jawapannya.',
     worked: 'Contohnya',
     markerNote: 'Garis bawah menandakan bulan berhari 31 — dan tarikh 31 itu sendiri.',
+    allTypes: 'Kesemua empat belas',
+    allTypesNote: 'Setiap tahun yang pernah ada, atau akan ada, ialah salah satu daripadanya.',
+    commonYears: 'Tahun biasa',
+    leapYears: 'Tahun lompat',
+    swipeHint: 'Seret grid ke sisi untuk menukar tahun.',
+    tryIt: 'Cuba',
     monthsLabel: 'Bulan',
     weekdayGridLabel: 'Hari',
     dateGridLabel: 'Tarikh',
@@ -242,6 +268,12 @@ export const translations: Record<Language, Translation> = {
     stepCross: 'Thứ ở chỗ hai bên giao nhau là đáp án.',
     worked: 'Ví dụ',
     markerNote: 'Gạch chân đánh dấu tháng có 31 ngày — và chính ngày 31.',
+    allTypes: 'Cả mười bốn',
+    allTypesNote: 'Mọi năm đã từng có, hoặc sẽ có, đều là một trong số này.',
+    commonYears: 'Năm thường',
+    leapYears: 'Năm nhuận',
+    swipeHint: 'Kéo ngang bảng để đổi năm.',
+    tryIt: 'Thử',
     monthsLabel: 'Tháng',
     weekdayGridLabel: 'Thứ',
     dateGridLabel: 'Ngày',

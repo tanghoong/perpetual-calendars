@@ -17,6 +17,8 @@ import {
   LAST_SUPPORTED_YEAR,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
+  monthColumnsForType,
+  nearestYearOfType,
   rowForDate,
   resolveCrosshair,
   rowForWeekdayInColumn,
@@ -487,5 +489,69 @@ describe('yearsWhere', () => {
     // 29 February is the one case where the answer is a strict subset of a
     // single calendar type rather than the whole of it.
     expect(found.every(y => daysInMonth(y, 1) === 29)).toBe(true);
+  });
+});
+
+describe('nearestYearOfType', () => {
+  const BOUNDS: [number, number] = [FIRST_GREGORIAN_YEAR, LAST_SUPPORTED_YEAR];
+
+  it('returns a year of the asked-for type, for every type', () => {
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      const y = nearestYearOfType(type, 2026, ...BOUNDS);
+      expect(y).not.toBeNull();
+      expect(calendarTypeOf(y!)).toBe(type);
+    }
+  });
+
+  it('returns the anchor itself when it already matches', () => {
+    expect(nearestYearOfType(calendarTypeOf(2026), 2026, ...BOUNDS)).toBe(2026);
+  });
+
+  it('is the nearest, preferring the later year on a tie', () => {
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      const found = nearestYearOfType(type, 2026, ...BOUNDS)!;
+      const distance = Math.abs(found - 2026);
+      // Nothing strictly closer exists.
+      for (let y = 2026 - distance + 1; y < 2026 + distance; y++) {
+        expect(calendarTypeOf(y)).not.toBe(type);
+      }
+      // A tie needs *both* neighbours at that distance to match; one of them
+      // matching alone is just the nearest, in whichever direction it lies.
+      const tied =
+        calendarTypeOf(2026 - distance) === type && calendarTypeOf(2026 + distance) === type;
+      if (tied) expect(found).toBe(2026 + distance);
+    }
+  });
+
+  it('never has to look further than a leap type recurs', () => {
+    // A leap-year type can skip a century's worth of leap years, which is the
+    // widest gap the walk ever has to cross.
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      for (const anchor of [1600, 1900, 2000, 2100, 2200]) {
+        const y = nearestYearOfType(type, anchor, ...BOUNDS)!;
+        expect(Math.abs(y - anchor)).toBeLessThanOrEqual(40);
+      }
+    }
+  });
+});
+
+describe('month silhouettes', () => {
+  it('are always exactly three rows tall, for every type', () => {
+    // The type thumbnails hard-code a height of 3 to keep a uniform grid. Twelve
+    // months over seven columns force at least one column to hold three, and no
+    // arrangement ever pushes a fourth into any of them — but that is a fact
+    // about the Gregorian month lengths, not an obvious one, so it is pinned.
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      const tallest = Math.max(...monthColumnsForType(type).map(c => c.length));
+      expect(tallest).toBe(3);
+    }
+  });
+
+  it('give every column at least one month, so no column is ever empty', () => {
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      for (const column of monthColumnsForType(type)) {
+        expect(column.length).toBeGreaterThan(0);
+      }
+    }
   });
 });

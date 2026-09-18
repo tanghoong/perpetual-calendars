@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowCounterclockwise,
   Checkmark,
@@ -9,6 +9,7 @@ import {
   XMark,
 } from './icons';
 import {
+  CALENDAR_TYPE_COUNT,
   calendarTypeOf,
   columnForMonth,
   dateAt,
@@ -22,6 +23,8 @@ import {
   LAST_SUPPORTED_YEAR,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
+  monthColumnsForType,
+  nearestYearOfType,
   resolveCrosshair,
   rowForDate,
   sameGridYears,
@@ -163,6 +166,12 @@ const YEAR_BOUNDS = { min: MIN_YEAR, max: MAX_YEAR };
 // bounds without the value ever falling outside its own option list.
 const PICKER_SPAN = 60;
 
+// Rows in a type's month silhouette. Three for every one of the fourteen, never
+// two and never four — twelve months over seven columns forces at least one
+// column to hold three, and no arrangement pushes a fourth into any of them.
+// Locked by a test, because the thumbnails hard-code it to keep a uniform height.
+const MONTH_ROWS = 3;
+
 // How many same-grid years to offer either side. Five is enough to cross a
 // century boundary for a common-year type, where they recur every 6 or 11 years,
 // without making the strip unreadable for a leap-year type, where they do not.
@@ -236,6 +245,31 @@ const CalendarBuilder = () => {
         max: MAX_YEAR,
       }),
     [year],
+  );
+
+  const clampYear = (y: number) => Math.min(MAX_YEAR, Math.max(MIN_YEAR, y));
+
+  /**
+   * All fourteen types, each with its silhouette and the nearest year that
+   * renders it.
+   *
+   * Depends on `year` only through `nearestYearOfType`, so the shapes and the
+   * letters are computed once per year change rather than per render — and they
+   * would be constant if the picker did not need a year to jump to.
+   */
+  const allTypes = useMemo(
+    () =>
+      Array.from({ length: CALENDAR_TYPE_COUNT }, (_, type) => ({
+        type,
+        shape: monthColumnsForType(type),
+        letter: dominicalLetterOf(type),
+        phrase: fill(
+          isLeapType(type) ? t.leapYearStarting : t.commonYearStarting,
+          t.weekdaysLong[startWeekdayOfType(type)],
+        ),
+        nearest: nearestYearOfType(type, year, MIN_YEAR, MAX_YEAR),
+      })),
+    [year, t],
   );
 
   // Centred on `year`, so stepping or jumping can never leave the value outside
@@ -380,29 +414,28 @@ const CalendarBuilder = () => {
     }
   };
 
+  /** The one shortcut that is a tool rather than a demonstration. */
+  const goToToday = () => {
+    setYear(currentYear);
+    setPinned({ month: currentMonth, date: currentDate, weekday: null, order: ['month', 'date'] });
+  };
+
   /**
-   * Shortcuts: the questions worth one tap.
+   * Two lookups worth trying, which live in the explainer rather than beside
+   * Today.
    *
-   * Deliberately culture-neutral — a hardcoded Christmas would be noise for
-   * three of the four languages this ships in. "Friday the 13th" earns its
-   * place by being the reverse lookup in its purest form: a date and a weekday,
+   * They were shortcuts on the main surface, and they were miscast: nobody
+   * arrives needing to know about Friday the 13th. They are *demonstrations* —
+   * "Friday 13" is the reverse lookup in its purest form, a date and a weekday
    * answered by a set of months, which is the query a conventional calendar is
-   * worst at.
+   * worst at, and 1 January is the plain forward lookup. Sitting inside "How to
+   * read it", each one is an example the reader can run, which is what they were
+   * always for, and the main surface is two buttons lighter.
+   *
+   * Deliberately culture-neutral: a hardcoded Christmas would be noise for three
+   * of the four languages this ships in.
    */
-  const presets: { key: string; label: string; apply: () => void }[] = [
-    {
-      key: 'today',
-      label: t.todayLabel,
-      apply: () => {
-        setYear(currentYear);
-        setPinned({
-          month: currentMonth,
-          date: currentDate,
-          weekday: null,
-          order: ['month', 'date'],
-        });
-      },
-    },
+  const examples: { key: string; label: string; apply: () => void }[] = [
     {
       key: 'friday13',
       label: `${t.weekdaysLong[5]} 13`,
@@ -416,6 +449,76 @@ const CalendarBuilder = () => {
       apply: () => setPinned({ month: 0, date: 1, weekday: null, order: ['month', 'date'] }),
     },
   ];
+
+  /**
+   * Drag the grid sideways to change the year.
+   *
+   * This is the whole instrument in one gesture. A physical perpetual calendar
+   * is a card with exactly one moving part: you slide it, and the thing re-reads.
+   * That is also literally what happens here — the twelve month chips are the
+   * only elements that move when the year changes, and the seven-by-seven block
+   * beneath them never moves at all, because it cannot. So the grid *is* the
+   * slider, and until now the only way to push it was a stepper parked at the
+   * top of the page.
+   *
+   * Dragging teaches the perpetual claim by feel: the months flow, everything
+   * else stays put. The year steps per `STEP_PX` of travel rather than on
+   * release, so a long drag crosses several years and the reader watches the
+   * months re-flow through each one.
+   */
+  const drag = useRef<{ x: number; y: number; year: number; axis: 'none' | 'x' | 'y' } | null>(null);
+  // A drag ends with a pointerup over some cell, and the browser turns that into
+  // a click — so without this the gesture would also select whatever the finger
+  // happened to land on. Set when a drag actually moves the year; consumed by
+  // the capture-phase handler before the cell ever sees the event.
+  const dragChangedYear = useRef(false);
+  const STEP_PX = 56;
+
+  const onDragStart = (e: React.PointerEvent) => {
+    // Cleared here, not after the click it suppresses. A drag does not reliably
+    // produce a trailing click — end it on an element that does not take one and
+    // none arrives — and a flag left standing would then eat the *next* genuine
+    // tap instead. Tying it to the start of a gesture means it can only ever
+    // suppress a click belonging to the gesture that set it.
+    dragChangedYear.current = false;
+    // Mouse drags would fight text selection and click-to-select for no gain —
+    // a mouse already has the stepper, the picker and the year chips.
+    if (e.pointerType === 'mouse') return;
+    drag.current = { x: e.clientX, y: e.clientY, year, axis: 'none' };
+  };
+
+  const onDragMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d === null) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    // Decide once which way this gesture is going. Without a lock, a mostly
+    // vertical scroll that wobbles sideways would step the year underneath the
+    // reader's thumb.
+    if (d.axis === 'none') {
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+      d.axis = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'x' : 'y';
+      if (d.axis === 'y') drag.current = null;
+      return;
+    }
+    // Dragging left moves forward, the direction a sheet of paper travels when
+    // you push the next one into view.
+    const next = clampYear(d.year - Math.trunc(dx / STEP_PX));
+    if (next !== year) {
+      setYear(next);
+      dragChangedYear.current = true;
+    }
+  };
+
+  const onDragEnd = () => {
+    drag.current = null;
+  };
+
+  const swallowClickAfterDrag = (e: React.MouseEvent) => {
+    if (!dragChangedYear.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   // Mouse only. Touch browsers synthesize a hover that persists after the tap,
   // which would outlive an unpin and leave the crosshair lit with nothing
@@ -663,20 +766,18 @@ const CalendarBuilder = () => {
             </button>
           </div>
 
-          {/* The header's right half carries both transient actions, which is
-              also where iOS puts a navigation bar's trailing controls. Clear is
-              icon-only so the two fit at 320px in the longest language. */}
+          {/* The header's trailing controls, which is where iOS puts them.
+              All icon-only, so the row still fits 320px in every language.
+
+              The "Current Year" pill used to live here and is gone: the Today
+              shortcut already resets the year, and does it while also naming
+              today's date, which is what a reader reaching for it actually
+              wanted. Two controls for one action was one too many.
+
+              Print moved up from the footer to sit beside Share. They are the
+              two ways this page leaves the screen, so they belong together —
+              and it leaves the footer holding nothing but the language. */}
           <div className="flex min-w-0 items-center gap-2 print:hidden">
-            {!showToday && (
-              <button
-                type="button"
-                onClick={() => setYear(currentYear)}
-                className={`${PRESSABLE} ${FOCUS_RING} flex h-9 min-w-0 items-center gap-1.5 rounded-full bg-ios-blue px-3.5 text-[13px] font-semibold text-white`}
-              >
-                <ArrowCounterclockwise className="h-[1.15em] w-[1.15em] shrink-0" />
-                <span className="truncate">{t.currentYear}</span>
-              </button>
-            )}
             {hasPin && (
               <button
                 type="button"
@@ -687,17 +788,23 @@ const CalendarBuilder = () => {
                 <XMark />
               </button>
             )}
-            {/* Icon-only, so the header still fits 320px in the longest
-                language with the Current Year pill also showing. */}
             <button
               type="button"
               onClick={share}
               aria-label={t.share}
-              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] print:hidden ${
+              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] ${
                 copied ? 'text-ios-blue' : 'text-ios-label-2'
               }`}
             >
               {copied ? <Checkmark /> : <ShareUp />}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              aria-label={t.print}
+              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] text-ios-label-2`}
+            >
+              <Printer />
             </button>
           </div>
         </div>
@@ -743,8 +850,16 @@ const CalendarBuilder = () => {
 
         {/* Grouped-content card */}
         <div
-          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 print:break-inside-avoid print:border print:border-black/10 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
+          className="mt-4 touch-pan-y rounded-[1.75rem] bg-ios-card p-2 print:break-inside-avoid print:border print:border-black/10 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
           onPointerLeave={() => setHovered(EMPTY)}
+          // touch-pan-y hands vertical scrolling back to the browser and keeps
+          // horizontal gestures here, which is what makes the drag possible
+          // without trapping the page.
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+          onClickCapture={swallowClickAfterDrag}
         >
           {/* Two blocks side by side, sized 5:7 to match their column counts.
               The gap is what makes the date axis read as separate from the
@@ -1089,16 +1204,14 @@ const CalendarBuilder = () => {
               className="w-34 cursor-pointer appearance-none bg-transparent font-semibold tabular-nums text-ios-blue focus:outline-none"
             />
           </label>
-            {presets.map(({ key, label, apply }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={apply}
-                className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
-              >
-                {label}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={goToToday}
+              className={`${PRESSABLE} ${FOCUS_RING} flex items-center gap-1.5 rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+            >
+              <ArrowCounterclockwise className="h-[1.1em] w-[1.1em] shrink-0" />
+              {t.todayLabel}
+            </button>
           </div>
         </div>
 
@@ -1148,6 +1261,27 @@ const CalendarBuilder = () => {
               <span className="underline decoration-2 underline-offset-2">{t.months[0]}</span>{' '}
               {t.markerNote}
             </p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.swipeHint}
+            </p>
+
+            {/* The two demonstrations, runnable. They read as examples here in a
+                way they never did as buttons parked beside Today. */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-semibold text-ios-label-3 sm:text-[13px]">
+                {t.tryIt}
+              </span>
+              {examples.map(({ key, label, apply }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={apply}
+                  className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </details>
         </div>
 
@@ -1185,15 +1319,6 @@ const CalendarBuilder = () => {
               })}
             </div>
           </fieldset>
-
-          <button
-            type="button"
-            onClick={() => window.print()}
-            aria-label={t.print}
-            className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] text-ios-label-2`}
-          >
-            <Printer />
-          </button>
         </div>
 
         {/* The fourth axis, and the only part of this page that argues the word
@@ -1251,6 +1376,102 @@ const CalendarBuilder = () => {
               );
             })}
           </div>
+
+          {/* Slide a physical perpetual calendar through every position and you
+              see its whole vocabulary at once. That is the half this app was
+              missing: a type could only be reached by already knowing a year of
+              that type, so the fourteen were a claim in the README rather than
+              something you could look at.
+
+              Each thumbnail is the month block's own silhouette — where the
+              twelve chips fall across the seven columns — which is the one thing
+              that distinguishes one type from another, and the reason two years
+              of a type render identical pages. Collapsed, so it costs a reader
+              who does not want it exactly one line. */}
+          <details className="group mt-3 px-1 print:hidden">
+            <summary
+              className={`${PRESSABLE} ${FOCUS_RING} inline-flex cursor-pointer list-none items-center gap-1 rounded-full text-[12px] font-semibold text-ios-blue sm:text-[13px] [&::-webkit-details-marker]:hidden`}
+            >
+              <span className="inline-block transition-transform group-open:rotate-90">
+                <ChevronRight className="h-[0.9em] w-[0.9em]" />
+              </span>
+              {t.allTypes}
+            </summary>
+
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.allTypesNote}
+            </p>
+
+            <ul className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
+              {allTypes.map(({ type, shape, letter, phrase, nearest }) => {
+                const isCurrent = type === calendarType;
+                return (
+                  <Fragment key={type}>
+                    {/* Both halves run Sunday to Saturday, so without a break
+                        the eighth tile reads as a repeat of the first rather
+                        than as the leap-year version of it — which undercuts
+                        the one thing this view exists to show. */}
+                    {(type === 0 || type === 7) && (
+                      <li className={`${SECTION_LABEL} col-span-full ${type === 0 ? '' : 'mt-2'}`}>
+                        {type === 0 ? t.commonYears : t.leapYears}
+                      </li>
+                    )}
+                    <li>
+                    <button
+                      type="button"
+                      disabled={nearest === null}
+                      onClick={() => nearest !== null && setYear(nearest)}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      aria-label={`${phrase} — ${nearest ?? ''}`}
+                      className={`${PRESSABLE} ${FOCUS_RING} flex w-full flex-col items-center gap-1 rounded-xl px-1.5 py-2 ${
+                        isCurrent ? 'bg-ios-blue-soft' : 'bg-ios-fill'
+                      }`}
+                    >
+                      {/* The silhouette: one cell per month, in its column,
+                          packed down exactly as the real block packs them. This
+                          is the whole difference between one type and the next,
+                          which is why two years of a type render the same page. */}
+                      <span aria-hidden="true" className="grid grid-cols-7 gap-px" title={phrase}>
+                        {Array.from({ length: MONTH_ROWS }, (_, r) =>
+                          shape.map((column, c) => {
+                            const filled = r >= MONTH_ROWS - column.length;
+                            return (
+                              <span
+                                key={`${r}-${c}`}
+                                className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${
+                                  filled
+                                    ? isCurrent
+                                      ? 'bg-ios-blue'
+                                      : 'bg-ios-label-3'
+                                    : 'bg-transparent'
+                                }`}
+                              />
+                            );
+                          }),
+                        )}
+                      </span>
+                      {/* The weekday leads, not the letter. Ordered Sunday to
+                          Saturday like every other weekday list on the page, the
+                          dominical letters come out A G F E D C B — correct, and
+                          unreadable as an ordering. The weekday is also the thing
+                          that actually determines the shape above it. */}
+                      <span
+                        className={`text-[11px] font-bold sm:text-[12px] ${
+                          isCurrent ? 'text-ios-blue' : 'text-ios-label-2'
+                        }`}
+                      >
+                        {t.weekdays[startWeekdayOfType(type)]}
+                      </span>
+                      <span className="text-[10px] tabular-nums text-ios-label-3 sm:text-[11px]">
+                        {nearest} · {letter}
+                      </span>
+                      </button>
+                    </li>
+                  </Fragment>
+                );
+              })}
+            </ul>
+          </details>
         </section>
       </div>
 
