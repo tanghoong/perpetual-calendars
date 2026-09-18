@@ -19,6 +19,28 @@ export interface Translation {
   weekdayLabel: string;
   todayLabel: string;
   presetsLabel: string;
+  /** Header action that copies or shares the current view's link. */
+  share: string;
+  /** Transient confirmation after a copy, where no share sheet was available. */
+  linkCopied: string;
+  /** Leads the list of years whose grid is identical to this one. */
+  sameGridAs: string;
+  /** Accessible name for the calendar-type badge. */
+  calendarTypeLabel: string;
+  /** `{d}` is the weekday the year starts on. */
+  commonYearStarting: string;
+  leapYearStarting: string;
+  prevSameGrid: string;
+  nextSameGrid: string;
+  /** The type-jump control's accessible group name. */
+  yearTypeNav: string;
+  /** Direct date entry. */
+  goToDate: string;
+  print: string;
+  /** Accessible names for the three blocks, once they carry grid semantics. */
+  monthsLabel: string;
+  weekdayGridLabel: string;
+  dateGridLabel: string;
 }
 
 /** Segment labels: four have to fit 320px, and the endonym is what a reader
@@ -43,6 +65,17 @@ export const LOCALES: Record<Language, string> = {
 export const isLanguage = (value: unknown): value is Language =>
   typeof value === 'string' && LANGUAGES.some(l => l.id === value);
 
+/**
+ * Fills the one placeholder these tables use.
+ *
+ * Kept to a single `{d}` rather than a general template engine: the only
+ * variable phrase in the UI is "<common|leap> year starting <weekday>", and the
+ * languages here put the weekday in different positions, which a concatenation
+ * could not express but a placeholder can.
+ */
+export const fill = (template: string, value: string): string =>
+  template.replace('{d}', value);
+
 export const translations: Record<Language, Translation> = {
   en: {
     title: 'One Page Calendar',
@@ -63,6 +96,20 @@ export const translations: Record<Language, Translation> = {
     weekdayLabel: 'Weekday',
     todayLabel: 'Today',
     presetsLabel: 'Shortcuts',
+    share: 'Share this view',
+    linkCopied: 'Link copied',
+    sameGridAs: 'Same grid as',
+    calendarTypeLabel: 'Calendar type',
+    commonYearStarting: 'Common year starting {d}',
+    leapYearStarting: 'Leap year starting {d}',
+    prevSameGrid: 'Previous year with this grid',
+    nextSameGrid: 'Next year with this grid',
+    yearTypeNav: 'Years sharing this grid',
+    goToDate: 'Go to date',
+    print: 'Print',
+    monthsLabel: 'Months',
+    weekdayGridLabel: 'Weekdays',
+    dateGridLabel: 'Dates',
   },
   zh: {
     title: '单页日历',
@@ -84,6 +131,20 @@ export const translations: Record<Language, Translation> = {
     weekdayLabel: '星期',
     todayLabel: '今天',
     presetsLabel: '快捷方式',
+    share: '分享当前视图',
+    linkCopied: '链接已复制',
+    sameGridAs: '同版面年份',
+    calendarTypeLabel: '日历类型',
+    commonYearStarting: '平年，{d}开始',
+    leapYearStarting: '闰年，{d}开始',
+    prevSameGrid: '上一个同版面年份',
+    nextSameGrid: '下一个同版面年份',
+    yearTypeNav: '同版面的年份',
+    goToDate: '跳转到日期',
+    print: '打印',
+    monthsLabel: '月份',
+    weekdayGridLabel: '星期',
+    dateGridLabel: '日期',
   },
   ms: {
     title: 'Kalendar Satu Halaman',
@@ -104,6 +165,20 @@ export const translations: Record<Language, Translation> = {
     weekdayLabel: 'Hari',
     todayLabel: 'Hari ini',
     presetsLabel: 'Pintasan',
+    share: 'Kongsi paparan ini',
+    linkCopied: 'Pautan disalin',
+    sameGridAs: 'Sama dengan tahun',
+    calendarTypeLabel: 'Jenis kalendar',
+    commonYearStarting: 'Tahun biasa bermula {d}',
+    leapYearStarting: 'Tahun lompat bermula {d}',
+    prevSameGrid: 'Tahun sama sebelumnya',
+    nextSameGrid: 'Tahun sama berikutnya',
+    yearTypeNav: 'Tahun dengan susunan sama',
+    goToDate: 'Pergi ke tarikh',
+    print: 'Cetak',
+    monthsLabel: 'Bulan',
+    weekdayGridLabel: 'Hari',
+    dateGridLabel: 'Tarikh',
   },
   vi: {
     title: 'Lịch Một Trang',
@@ -124,5 +199,19 @@ export const translations: Record<Language, Translation> = {
     weekdayLabel: 'Thứ',
     todayLabel: 'Hôm nay',
     presetsLabel: 'Lối tắt',
+    share: 'Chia sẻ chế độ xem này',
+    linkCopied: 'Đã sao chép liên kết',
+    sameGridAs: 'Cùng bố cục với',
+    calendarTypeLabel: 'Loại lịch',
+    commonYearStarting: 'Năm thường bắt đầu {d}',
+    leapYearStarting: 'Năm nhuận bắt đầu {d}',
+    prevSameGrid: 'Năm cùng bố cục trước',
+    nextSameGrid: 'Năm cùng bố cục sau',
+    yearTypeNav: 'Các năm cùng bố cục',
+    goToDate: 'Đến ngày',
+    print: 'In',
+    monthsLabel: 'Tháng',
+    weekdayGridLabel: 'Thứ',
+    dateGridLabel: 'Ngày',
   },
 };

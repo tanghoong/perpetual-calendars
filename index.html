@@ -6,7 +6,10 @@
          which the layout consumes via env(safe-area-inset-*). -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="apple-touch-icon" href="/icon.svg" />
+    <!-- iOS does not accept an SVG here: a Home Screen icon has to be a PNG,
+         so the SVG one silently produced a screenshot thumbnail instead. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
 
     <title>One Page Calendar</title>
     <meta name="description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
@@ -23,10 +26,22 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Calendar" />
 
+    <!-- %SITE_URL% is substituted at build time by vite.config.ts, because a
+         crawler fetches these images out of page context and will not resolve
+         a relative path. -->
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="%SITE_URL%/" />
+    <meta property="og:site_name" content="One Page Calendar" />
     <meta property="og:title" content="One Page Calendar" />
     <meta property="og:description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="%SITE_URL%/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The One Page Calendar grid with December and the 25th selected, lighting the Friday cell where they cross." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="One Page Calendar" />
+    <meta name="twitter:description" content="A whole year on a single grid: find the month's column, the date's row, and read the weekday where they cross." />
+    <meta name="twitter:image" content="%SITE_URL%/og.png" />
   </head>
   <body>
     <div id="root"></div>

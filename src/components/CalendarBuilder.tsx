@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowCounterclockwise, ChevronLeft, ChevronRight, XMark } from './icons';
+import {
+  ArrowCounterclockwise,
+  Checkmark,
+  ChevronLeft,
+  ChevronRight,
+  Printer,
+  ShareUp,
+  XMark,
+} from './icons';
 import {
   columnForMonth,
   dateAt,
@@ -13,7 +21,7 @@ import {
   weekdayAt,
 } from '../lib/calendar';
 import { formatDate, formatList } from '../lib/format';
-import { LOCALES, translations } from '../lib/i18n';
+import { LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
 import { readViewState, syncUrl } from '../lib/urlState';
 
 /**
@@ -111,9 +119,9 @@ const CalendarBuilder = () => {
     readViewState(window.location.search, currentYear, YEAR_BOUNDS),
   );
   const [year, setYear] = useState(initial.year);
-  // Read from ?lang= once and then held constant: the switcher is gone from the
-  // UI, so nothing can change it during a session.
-  const language = initial.language;
+  // Seeded from ?lang= and then owned by the switcher. It stays in the URL, so
+  // a language choice survives a reload and travels with a shared link.
+  const [language, setLanguage] = useState<Language>(initial.language);
   const [pinned, setPinned] = useState<Pinned>(() => ({
     month: initial.month,
     date: initial.date,
@@ -230,6 +238,50 @@ const CalendarBuilder = () => {
     setHovered(EMPTY);
   };
 
+  // The document language drives screen-reader pronunciation and the browser's
+  // own offer to translate. It was pinned to "en" in index.html while the page
+  // could already render Chinese, Malay or Vietnamese from ?lang=.
+  useEffect(() => {
+    document.documentElement.lang = LOCALES[language];
+  }, [language]);
+
+  /**
+   * Shares the current view.
+   *
+   * `urlState` has been mirroring the whole selection into the address bar all
+   * along, but nothing in the UI said so, which made a shareable view a feature
+   * only its author knew about. The native sheet is the right affordance where
+   * it exists — on iOS it is how anything gets shared — and a clipboard copy is
+   * the fallback everywhere else.
+   */
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+
+  const share = async () => {
+    const url = window.location.href;
+    if (typeof navigator.share === 'function') {
+      // A dismissed share sheet rejects. That is the user declining, not a
+      // failure, so it must not fall through to a surprise clipboard write.
+      try {
+        await navigator.share({ title: t.title, text: headline, url });
+      } catch {
+        /* dismissed */
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      // Clipboard access is permission-gated and absent over plain HTTP. There
+      // is nothing useful to say: the address bar already holds the same link.
+    }
+  };
+
   /**
    * Shortcuts: the questions worth one tap.
    *
@@ -336,7 +388,7 @@ const CalendarBuilder = () => {
           grid areas rather than duplicated markup, so the DOM order — and with
           it the tab order and the screen-reader order — stays the reading
           order at every width. */}
-      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4">
+      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4">
         {/* aria-live announces the resolved date as focus moves through the
             grid, which is what turns the crosshair into something a screen
             reader can follow. min-h reserves two lines so stepping between
@@ -354,7 +406,7 @@ const CalendarBuilder = () => {
             57px at `lg`. Each holds a few pixels of slack over that. */}
         <div
           aria-live="polite"
-          className="flex min-h-12 flex-col justify-start sm:min-h-[4.5rem] lg:col-span-2 lg:min-h-16"
+          className="flex min-h-12 flex-col justify-start sm:min-h-18 lg:col-span-2 lg:min-h-16"
         >
           <h1 className="text-[18px] font-bold leading-tight tracking-[-0.015em] tabular-nums sm:text-[26px]">
             {headline}
@@ -432,6 +484,18 @@ const CalendarBuilder = () => {
                 <XMark />
               </button>
             )}
+            {/* Icon-only, so the header still fits 320px in the longest
+                language with the Current Year pill also showing. */}
+            <button
+              type="button"
+              onClick={share}
+              aria-label={t.share}
+              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] print:hidden ${
+                copied ? 'text-ios-blue' : 'text-ios-label-2'
+              }`}
+            >
+              {copied ? <Checkmark /> : <ShareUp />}
+            </button>
           </div>
         </div>
 
@@ -473,7 +537,7 @@ const CalendarBuilder = () => {
 
         {/* Grouped-content card */}
         <div
-          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-4 lg:mt-0"
+          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
           onPointerLeave={() => setHovered(EMPTY)}
         >
           {/* Two blocks side by side, sized 5:7 to match their column counts.
@@ -686,7 +750,65 @@ const CalendarBuilder = () => {
           {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
         </p>
 
+        {/* Settings, at the foot of the page on a phone and of the left rail on
+            desktop. The language control came back here rather than to its old
+            slot above the grid, which the weekday filter now owns and earns. */}
+        <div className="mt-5 flex items-center gap-2 px-1 print:hidden lg:col-start-1 lg:row-start-6 lg:mt-4">
+          {/* Real radio inputs inside a fieldset: it looks like an iOS segmented
+              control but keeps native group semantics and native arrow-key
+              navigation, which an aria-pressed button set would have to
+              reimplement badly. */}
+          <fieldset className="min-w-0 flex-1">
+            <legend className="sr-only">{t.languageLabel}</legend>
+            <div className="flex rounded-full bg-ios-fill p-0.5">
+              {LANGUAGES.map(({ id, short }) => {
+                const isOn = language === id;
+                return (
+                  <label
+                    key={id}
+                    className={`${PRESSABLE} flex-1 cursor-pointer rounded-full py-1.5 text-center text-[12px] font-semibold transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ios-blue sm:text-[13px] ${
+                      isOn ? 'bg-ios-thumb text-ios-label shadow-sm' : 'text-ios-label-2'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="language"
+                      value={id}
+                      checked={isOn}
+                      onChange={() => setLanguage(id)}
+                      className="sr-only"
+                    />
+                    {short}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
+          <button
+            type="button"
+            onClick={() => window.print()}
+            aria-label={t.print}
+            className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] text-ios-label-2`}
+          >
+            <Printer />
+          </button>
+        </div>
       </div>
+
+      {/* Fixed rather than in flow: a confirmation that shifted the page would
+          undo the "nothing moves" property the layout is built around. Only
+          reached where there is no native share sheet to speak for itself. */}
+      {copied && (
+        <div
+          role="status"
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 print:hidden"
+        >
+          <span className="rounded-full bg-ios-label px-4 py-2 text-[13px] font-semibold text-ios-bg shadow-lg">
+            {t.linkCopied}
+          </span>
+        </div>
+      )}
     </div>
   );
 };
