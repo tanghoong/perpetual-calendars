@@ -9,19 +9,26 @@ import {
   XMark,
 } from './icons';
 import {
+  calendarTypeOf,
   columnForMonth,
   dateAt,
   datesInRow,
   daysInMonth,
+  dominicalLetterOf,
+  FIRST_GREGORIAN_YEAR,
   isBeforeToday,
+  isLeapType,
+  LAST_SUPPORTED_YEAR,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
   resolveCrosshair,
   rowForDate,
+  sameGridYears,
+  startWeekdayOfType,
   weekdayAt,
 } from '../lib/calendar';
 import { formatDate, formatList } from '../lib/format';
-import { LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
+import { fill, LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
 import { readViewState, syncUrl } from '../lib/urlState';
 
 /**
@@ -97,14 +104,23 @@ const FOCUS_RING =
 const CELL_FOCUS =
   'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-ios-blue';
 
-// The jump range offered by the year picker. The steppers clamp to the same
-// bounds, so `year` can never sit outside the option list and leave the select
-// rendering blank.
-const THIS_YEAR = new Date().getFullYear();
-const MIN_YEAR = THIS_YEAR - 60;
-const MAX_YEAR = THIS_YEAR + 60;
+// The year range, which is now the calendar's real range rather than a window
+// around today. A perpetual calendar has no sliding bound; what it does have is
+// a first year it can honestly claim to be right about, and that is the year the
+// Gregorian calendar was fully in effect.
+const MIN_YEAR = FIRST_GREGORIAN_YEAR;
+const MAX_YEAR = LAST_SUPPORTED_YEAR;
 const YEAR_BOUNDS = { min: MIN_YEAR, max: MAX_YEAR };
-const YEARS = Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
+
+// The picker cannot list 8,417 years, so it lists a window — centred on the
+// current year rather than on today, which is what lets the steppers run to the
+// bounds without the value ever falling outside its own option list.
+const PICKER_SPAN = 60;
+
+// How many same-grid years to offer either side. Five is enough to cross a
+// century boundary for a common-year type, where they recur every 6 or 11 years,
+// without making the strip unreadable for a leap-year type, where they do not.
+const SAME_GRID_NEIGHBOURS = 5;
 
 const CalendarBuilder = () => {
   // One Date for the life of the component: it feeds memo dependencies, and a
@@ -147,6 +163,34 @@ const CalendarBuilder = () => {
 
   const monthColumns = useMemo(() => monthColumnsFor(year), [year]);
   const monthRowCount = Math.max(...monthColumns.map(col => col.length));
+
+  // The fourth axis. A year contributes exactly one thing to this layout — the
+  // arrangement of the twelve month chips — and there are only fourteen of those,
+  // so every year is one of fourteen. The strip below names the neighbours that
+  // share this one, which is the whole perpetual claim in a single row.
+  const calendarType = calendarTypeOf(year);
+  const typePhrase = fill(
+    isLeapType(calendarType) ? t.leapYearStarting : t.commonYearStarting,
+    t.weekdaysLong[startWeekdayOfType(calendarType)],
+  );
+  const sameGrid = useMemo(
+    () =>
+      sameGridYears(year, {
+        before: SAME_GRID_NEIGHBOURS,
+        after: SAME_GRID_NEIGHBOURS,
+        min: MIN_YEAR,
+        max: MAX_YEAR,
+      }),
+    [year],
+  );
+
+  // Centred on `year`, so stepping or jumping can never leave the value outside
+  // its own option list — which would render the select blank.
+  const yearOptions = useMemo(() => {
+    const from = Math.max(MIN_YEAR, year - PICKER_SPAN);
+    const to = Math.min(MAX_YEAR, year + PICKER_SPAN);
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  }, [year]);
 
   // Each axis resolves independently, and a pin beats a hover on its own axis.
   // That is what makes "pin the month, then sweep the dates" work: the pinned
@@ -388,7 +432,7 @@ const CalendarBuilder = () => {
           grid areas rather than duplicated markup, so the DOM order — and with
           it the tab order and the screen-reader order — stays the reading
           order at every width. */}
-      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4">
+      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_auto_1fr_auto] lg:items-start lg:gap-x-8 lg:gap-y-4">
         {/* aria-live announces the resolved date as focus moves through the
             grid, which is what turns the crosshair into something a screen
             reader can follow. min-h reserves two lines so stepping between
@@ -443,7 +487,7 @@ const CalendarBuilder = () => {
                 showToday ? 'text-ios-blue' : 'text-ios-label'
               }`}
             >
-              {YEARS.map(y => (
+              {yearOptions.map(y => (
                 <option key={y} value={y}>
                   {y}
                 </option>
@@ -794,6 +838,59 @@ const CalendarBuilder = () => {
             <Printer />
           </button>
         </div>
+
+        {/* The fourth axis, and the only part of this page that argues the word
+            "perpetual".
+
+            Everything above answers a question about one year. This says the
+            year barely matters: the grid above is one of exactly fourteen, and
+            these are the neighbours it also serves. It doubles as the lookup no
+            conventional calendar can do at all — every year listed puts *every*
+            date on the same weekday, so once you have found the year your
+            birthday is a Saturday, these are all the others.
+
+            Full width below both columns on desktop, because eleven year chips
+            do not fit a 15rem rail and this is the one block that belongs to the
+            whole page rather than to the controls. */}
+        <section
+          aria-label={t.yearTypeNav}
+          className="mt-5 lg:col-span-2 lg:row-start-7 lg:mt-2"
+        >
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1">
+            <h2 className="text-[12px] font-semibold text-ios-label-2 sm:text-[13px]">
+              {t.sameGridAs}
+            </h2>
+            {/* The dominical letter is the traditional name for precisely this
+                classification, so it is worth carrying — quietly, after the
+                phrase that actually explains it. */}
+            <p className="text-[12px] text-ios-label-3 sm:text-[13px]">
+              <span aria-hidden="true">·</span> {typePhrase}{' '}
+              <span title={t.calendarTypeLabel}>({dominicalLetterOf(calendarType)})</span>
+            </p>
+          </div>
+
+          {/* Scrolls rather than wraps: a fixed single row keeps the block's
+              height constant as the year changes, and a leap-year type returns
+              far fewer neighbours than a common-year one. */}
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none">
+            {sameGrid.map(y => {
+              const isCurrent = y === year;
+              return (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => setYear(y)}
+                  aria-current={isCurrent ? 'true' : undefined}
+                  className={`${PRESSABLE} ${FOCUS_RING} shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold tabular-nums ${
+                    isCurrent ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-blue'
+                  }`}
+                >
+                  {y}
+                </button>
+              );
+            })}
+          </div>
+        </section>
       </div>
 
       {/* Fixed rather than in flow: a confirmation that shifted the page would

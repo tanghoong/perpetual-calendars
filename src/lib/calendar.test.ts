@@ -1,19 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CALENDAR_TYPE_COUNT,
+  calendarTypeOf,
   columnForMonth,
   columnForWeekdayInRow,
   dateAt,
   datesInRow,
   daysInMonth,
+  dominicalLetterOf,
+  FIRST_GREGORIAN_YEAR,
   firstWeekdayOf,
   isBeforeToday,
+  isLeapType,
   isLeapYear,
+  jan1Weekday,
+  LAST_SUPPORTED_YEAR,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
   rowForDate,
   resolveCrosshair,
   rowForWeekdayInColumn,
+  sameGridYears,
+  startWeekdayOfType,
   weekdayAt,
+  weekdayOf,
+  yearsWhere,
 } from './calendar';
 
 // A wide sweep rather than a handful of hand-picked years: the whole point of
@@ -292,5 +303,189 @@ describe('resolveCrosshair', () => {
     expect(resolveCrosshair(2026, { month: null, date: 15, weekday: null })).toEqual({ col: null, row: 0 });
     // A lone weekday fixes neither.
     expect(resolveCrosshair(2026, { month: null, date: null, weekday: 3 })).toEqual({ col: null, row: null });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The perpetual layer
+ * ------------------------------------------------------------------ */
+
+/**
+ * A proleptic-Gregorian oracle that survives years 0..99.
+ *
+ * `new Date(26, 0, 1)` is 1926 — the two-digit-year legacy of the constructor —
+ * which is exactly the bug this module was rewritten to escape, so the tests
+ * below cannot use it as their reference. `setUTCFullYear` is not affected.
+ */
+const weekdayViaUTC = (year: number, monthIndex: number, date: number): number => {
+  const d = new Date(Date.UTC(2000, monthIndex, date));
+  d.setUTCFullYear(year);
+  return d.getUTCDay();
+};
+
+describe('perpetual arithmetic', () => {
+  it('agrees with Date across the whole Gregorian era, not just nearby years', () => {
+    for (let y = FIRST_GREGORIAN_YEAR; y <= 2400; y += 7) {
+      for (let m = 0; m < 12; m++) {
+        expect(firstWeekdayOf(y, m)).toBe(new Date(y, m, 1).getDay());
+      }
+    }
+  });
+
+  it('is right for years 0..99, where the old Date-based version was not', () => {
+    for (let y = 0; y < 100; y++) {
+      expect(jan1Weekday(y)).toBe(weekdayViaUTC(y, 0, 1));
+    }
+    // The specific trap: Date maps year 26 to 1926, which starts on a Friday.
+    expect(new Date(26, 0, 1).getFullYear()).toBe(1926);
+    expect(jan1Weekday(26)).toBe(weekdayViaUTC(26, 0, 1));
+  });
+
+  it('stays exact at year magnitudes that would overflow a day count', () => {
+    // Folding into 1..400 is what keeps this in the safe-integer range.
+    for (const y of [100000, 1000000, 123456789]) {
+      expect(jan1Weekday(y)).toBe(jan1Weekday(y % 400 === 0 ? 400 : y % 400));
+      expect(Number.isInteger(jan1Weekday(y))).toBe(true);
+    }
+  });
+
+  it('repeats exactly every 400 years', () => {
+    for (let y = FIRST_GREGORIAN_YEAR; y < FIRST_GREGORIAN_YEAR + 400; y++) {
+      expect(calendarTypeOf(y + 400)).toBe(calendarTypeOf(y));
+      expect(monthColumnsFor(y + 400)).toEqual(monthColumnsFor(y));
+    }
+  });
+});
+
+describe('calendarTypeOf', () => {
+  it('produces exactly fourteen types, and every one of them occurs', () => {
+    const seen = new Set<number>();
+    for (let y = 2000; y < 2400; y++) seen.add(calendarTypeOf(y));
+    expect(seen.size).toBe(CALENDAR_TYPE_COUNT);
+    expect([...seen].sort((a, b) => a - b)).toEqual([...Array(CALENDAR_TYPE_COUNT).keys()]);
+  });
+
+  it('gives identical grids to same-type years and different grids otherwise', () => {
+    const byType = new Map<number, number[][]>();
+    for (let y = 1800; y < 2200; y++) {
+      const type = calendarTypeOf(y);
+      const grid = monthColumnsFor(y);
+      const known = byType.get(type);
+      if (known === undefined) byType.set(type, grid);
+      else expect(grid).toEqual(known);
+    }
+    // Distinct types must not collide, or "same grid" would be a weaker claim
+    // than the UI makes.
+    const serialised = [...byType.values()].map(g => JSON.stringify(g));
+    expect(new Set(serialised).size).toBe(CALENDAR_TYPE_COUNT);
+  });
+
+  it('separates leap years from common years', () => {
+    for (let y = 1900; y < 2100; y++) {
+      expect(isLeapType(calendarTypeOf(y))).toBe(isLeapYear(y));
+      expect(startWeekdayOfType(calendarTypeOf(y))).toBe(jan1Weekday(y));
+    }
+  });
+});
+
+describe('dominicalLetterOf', () => {
+  it('matches the published letters', () => {
+    expect(dominicalLetterOf(calendarTypeOf(2023))).toBe('A');
+    expect(dominicalLetterOf(calendarTypeOf(2026))).toBe('D');
+    expect(dominicalLetterOf(calendarTypeOf(2024))).toBe('GF');
+    expect(dominicalLetterOf(calendarTypeOf(2020))).toBe('ED');
+  });
+
+  it('gives one letter to common years and two to leap years', () => {
+    for (let type = 0; type < CALENDAR_TYPE_COUNT; type++) {
+      expect(dominicalLetterOf(type)).toHaveLength(isLeapType(type) ? 2 : 1);
+    }
+  });
+
+  it('puts the letter on the year\'s first Sunday', () => {
+    for (let y = 1990; y < 2060; y++) {
+      const letter = dominicalLetterOf(calendarTypeOf(y))[0];
+      const firstSunday = 1 + ((7 - jan1Weekday(y)) % 7);
+      expect(weekdayOf(y, 0, firstSunday)).toBe(0);
+      expect('ABCDEFG'[firstSunday - 1]).toBe(letter);
+    }
+  });
+});
+
+describe('sameGridYears', () => {
+  const BOUNDS = { min: FIRST_GREGORIAN_YEAR, max: LAST_SUPPORTED_YEAR };
+
+  it('includes the year itself, in order', () => {
+    const years = sameGridYears(2026, { before: 5, after: 5, ...BOUNDS });
+    expect(years).toContain(2026);
+    expect([...years].sort((a, b) => a - b)).toEqual(years);
+    expect(years).toEqual([
+      1981, 1987, 1998, 2009, 2015, 2026, 2037, 2043, 2054, 2065, 2071,
+    ]);
+  });
+
+  it('returns only years whose grid is byte-identical', () => {
+    for (const anchor of [1999, 2024, 2026, 2100, 2400]) {
+      const grid = monthColumnsFor(anchor);
+      for (const y of sameGridYears(anchor, { before: 4, after: 4, ...BOUNDS })) {
+        expect(monthColumnsFor(y)).toEqual(grid);
+      }
+    }
+  });
+
+  it('finds leap-year partners too, which recur far more rarely', () => {
+    // A common-year type returns about every 6 or 11 years; a leap-year type
+    // only every 28, and further across a century boundary. A fixed-width
+    // window would have found plenty of one and almost none of the other.
+    const leap = sameGridYears(2024, { before: 3, after: 3, ...BOUNDS });
+    expect(leap).toHaveLength(7);
+    for (const y of leap) expect(isLeapYear(y)).toBe(true);
+    expect(leap).toContain(1996);
+    expect(leap).toContain(2052);
+  });
+
+  it('clamps at the bounds instead of inventing years', () => {
+    const atStart = sameGridYears(FIRST_GREGORIAN_YEAR, {
+      before: 5,
+      after: 2,
+      ...BOUNDS,
+    });
+    expect(atStart[0]).toBe(FIRST_GREGORIAN_YEAR);
+    expect(atStart.every(y => y >= FIRST_GREGORIAN_YEAR && y <= LAST_SUPPORTED_YEAR)).toBe(true);
+  });
+
+  it('answers "which years is this date this weekday?" — the fourth lookup', () => {
+    // The UI leans on this: every year sharing a grid puts every date on the
+    // same weekday, so the strip of same-grid years *is* the answer.
+    for (const [m, d] of [[0, 1], [8, 2], [11, 25], [1, 28]] as const) {
+      const weekday = weekdayOf(2026, m, d);
+      const viaGrid = sameGridYears(2026, { before: 6, after: 6, ...BOUNDS });
+      for (const y of viaGrid) expect(weekdayOf(y, m, d)).toBe(weekday);
+      // And the direct search agrees, over the span the strip covers.
+      const span = yearsWhere(m, d, weekday, viaGrid[0], viaGrid[viaGrid.length - 1]);
+      expect(span).toEqual(expect.arrayContaining(viaGrid));
+    }
+  });
+});
+
+describe('yearsWhere', () => {
+  it('agrees with a Date sweep', () => {
+    const found = yearsWhere(11, 25, 5, 1990, 2060);
+    const expected: number[] = [];
+    for (let y = 1990; y <= 2060; y++) {
+      if (new Date(y, 11, 25).getDay() === 5) expected.push(y);
+    }
+    expect(found).toEqual(expected);
+  });
+
+  it('skips years where the date does not exist', () => {
+    const found = yearsWhere(1, 29, 4, 1990, 2060);
+    for (const y of found) {
+      expect(isLeapYear(y)).toBe(true);
+      expect(weekdayOf(y, 1, 29)).toBe(4);
+    }
+    // 29 February is the one case where the answer is a strict subset of a
+    // single calendar type rather than the whole of it.
+    expect(found.every(y => daysInMonth(y, 1) === 29)).toBe(true);
   });
 });

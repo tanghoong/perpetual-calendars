@@ -55,20 +55,6 @@ export const XMark = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
   </svg>
 )
 
-/** SF `chevron.left.2` — the jump to the previous year sharing this grid. */
-export const ChevronLeft2 = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
-  <svg {...base} strokeWidth={2.5} className={className}>
-    <path d="M11 5.5 5.5 12 11 18.5M18.5 5.5 13 12l5.5 6.5" />
-  </svg>
-)
-
-/** SF `chevron.right.2`. */
-export const ChevronRight2 = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
-  <svg {...base} strokeWidth={2.5} className={className}>
-    <path d="M5.5 5.5 11 12l-5.5 6.5M13 5.5 18.5 12 13 18.5" />
-  </svg>
-)
-
 /** SF `square.and.arrow.up` — the platform share affordance on iOS. */
 export const ShareUp = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
   <svg {...base} strokeWidth={2.4} className={className}>
