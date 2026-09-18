@@ -12,6 +12,7 @@ import {
   calendarTypeOf,
   columnForMonth,
   dateAt,
+  DATE_COLS,
   datesInRow,
   daysInMonth,
   dominicalLetterOf,
@@ -111,6 +112,37 @@ const DATE_TEXT = 'text-[11px] sm:text-[13px] lg:text-[15px]';
 const LABEL_TEXT =
   'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal lg:text-[14px]';
 
+/**
+ * Rounding for a tile sitting at the outer edge of a highlight band.
+ *
+ * The crosshair is a plus sign built out of abutting squares, and a plus sign
+ * cut off square at all four tips looks like it was clipped rather than drawn.
+ * Only the *outer* corners round: a corner is outer when both edges meeting
+ * there have nothing lit beyond them, which is what keeps the band's inner
+ * angles sharp and lets it close up where the arms cross.
+ *
+ * Callers pass which edges are exposed rather than their coordinates, because
+ * each of the three blocks decides that differently — the month column's band
+ * continues downward into the weekday grid, the date row's does not continue
+ * anywhere, and the weekday grid has both arms running through it.
+ */
+const bandCorners = (top: boolean, right: boolean, bottom: boolean, left: boolean): string =>
+  [
+    top && left ? 'rounded-tl-lg' : '',
+    top && right ? 'rounded-tr-lg' : '',
+    bottom && right ? 'rounded-br-lg' : '',
+    bottom && left ? 'rounded-bl-lg' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+// Every group of controls says what it is. They were previously distinguishable
+// only by shape, which left a reader looking at three unlabelled rows of pills
+// above and below the grid with no way to tell a filter from a shortcut — the
+// names existed, but only as aria-labels, so only a screen reader got them.
+const SECTION_LABEL =
+  'px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ios-label-3';
+
 // iOS control surface: dims on press rather than flashing a highlight.
 const PRESSABLE = 'select-none transition active:opacity-55';
 const FOCUS_RING =
@@ -159,6 +191,14 @@ const CalendarBuilder = () => {
     order: (['month', 'date', 'weekday'] as Axis[]).filter(a => initial[a] !== null),
   }));
   const [hovered, setHovered] = useState<Selection>(EMPTY);
+
+  // The explainer starts open for a reader arriving cold, and closed for one
+  // arriving on a shared link — that link came with context, and its sender
+  // did not mean to send a tutorial. Derived once from the URL rather than
+  // stored, so there is still nothing persisted anywhere.
+  const [explainerOpen, setExplainerOpen] = useState(
+    () => initial.month === null && initial.date === null && initial.weekday === null,
+  );
 
   const t = translations[language];
 
@@ -667,11 +707,13 @@ const CalendarBuilder = () => {
             can never express "I only care about Fridays" — the half of the
             lookup a conventional calendar is worst at. Sitting directly above
             the grid, it now reads as what it is: a filter on the whole board. */}
-        <div
-          role="group"
-          aria-label={t.weekdayLabel}
-          className="mt-3 grid grid-cols-7 gap-1 print:hidden lg:col-start-1 lg:row-start-3 lg:mt-0 lg:grid-cols-4"
-        >
+        <div className="mt-4 print:hidden lg:col-start-1 lg:row-start-3 lg:mt-0">
+          <h2 className={SECTION_LABEL}>{t.weekdayLabel}</h2>
+          <div
+            role="group"
+            aria-label={t.weekdayLabel}
+            className="mt-1.5 grid grid-cols-7 gap-1 lg:grid-cols-4"
+          >
           {t.weekdays.map((label, weekday) => {
             const isOn = activeWeekday === weekday;
             return (
@@ -691,11 +733,12 @@ const CalendarBuilder = () => {
                       ? 'bg-ios-fill text-ios-red'
                       : 'bg-ios-fill text-ios-label-2'
                 }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Grouped-content card */}
@@ -709,11 +752,13 @@ const CalendarBuilder = () => {
           <div className="flex gap-1.5 sm:gap-3">
             {/* Dates */}
             <div className="flex-5">
-              {/* Mirrors the month grid's shape with the same cell and gap
-                  classes, so both blocks start on the same line at every
-                  breakpoint without hard-coded offsets. The otherwise dead
-                  corner carries the axis label. */}
-              <div className="mb-px grid grid-cols-5 sm:mb-1">
+              {/* Mirrors the month grid's shape with the same cell classes, so
+                  both blocks start on the same line at every breakpoint without
+                  hard-coded offsets. The otherwise dead corner carries the axis
+                  label. No bottom margin: the month column's band runs straight
+                  down into the weekday grid, and a margin there left a bright
+                  line with an unpainted gap through the middle of it. */}
+              <div className="grid grid-cols-5">
                 {Array.from({ length: (monthRowCount - 1) * 5 }, (_, i) => (
                   <div key={`pad-${i}`} className={CELL} />
                 ))}
@@ -737,8 +782,37 @@ const CalendarBuilder = () => {
               >
                 {Array.from({ length: 7 }, (_, row) =>
                   Array.from({ length: 5 }, (_, col) => {
-                    const num = dateAt(row, col);
-                    if (num === null) return <div key={`d-${row}-${col}`} />;
+                    // Columns run *backwards*: 1-7 on the right, 29-31 on the
+                    // left. Every row is the same weekday whichever column you
+                    // read it in, so the order costs nothing — and it moves the
+                    // four cells that hold no date out of the block's inner edge,
+                    // where they sat as a notch between the dates and the weekday
+                    // grid, to its outer edge, where they read as margin.
+                    const num = dateAt(row, DATE_COLS - 1 - col);
+                    const inActiveRow = activeRow === row;
+                    // The date row's band is a bar on its own — nothing lit sits
+                    // above or below it — so both of its ends round. Only cells
+                    // actually in the band ask for corners; elsewhere the radius
+                    // would be invisible anyway, but it would round today's ring.
+                    const corners = inActiveRow
+                      ? bandCorners(true, col === DATE_COLS - 1, true, col === 0)
+                      : '';
+
+                    // Rows 4-7 run out of dates before they run out of columns.
+                    // Those cells still carry the band: it marks the row, not the
+                    // dates in it, and stopping short of the edge left the bar
+                    // looking broken off rather than finished.
+                    if (num === null) {
+                      return (
+                        <div key={`d-${row}-${col}`} className={CELL}>
+                          <span
+                            className={`${TILE} ${corners} ${
+                              inActiveRow ? 'bg-ios-blue-soft' : ''
+                            }`}
+                          />
+                        </div>
+                      );
+                    }
 
                     // Only real once a month is known — which is exactly why the
                     // month block is selectable.
@@ -749,7 +823,6 @@ const CalendarBuilder = () => {
                       num === currentDate &&
                       (activeMonth === null || activeMonth === currentMonth);
                     const isPast = isBeforeToday(year, activeMonth, num, today);
-                    const inActiveRow = activeRow === row;
                     // The mirror case: a month and a weekday resolve a row, and
                     // every date in it is an answer.
                     const answering = activeDate === null && activeRow !== null;
@@ -769,7 +842,7 @@ const CalendarBuilder = () => {
                       >
                         <span
                           aria-current={isToday ? 'date' : undefined}
-                          className={`${TILE} ${DATE_TEXT} ${CELL_FOCUS} font-medium tabular-nums ${
+                          className={`${TILE} ${DATE_TEXT} ${CELL_FOCUS} ${corners} font-medium tabular-nums ${
                             outOfRange
                               ? 'text-ios-label-3 line-through decoration-1 opacity-40'
                               : isSelected || isAnswer
@@ -783,7 +856,7 @@ const CalendarBuilder = () => {
                                   // findable in every state instead of having to
                                   // stand down whenever something is selected.
                                   isToday
-                                  ? `font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue ${
+                                  ? `rounded-lg font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue ${
                                       inActiveRow ? 'bg-ios-blue-soft' : ''
                                     }`
                                   : inActiveRow
@@ -804,32 +877,32 @@ const CalendarBuilder = () => {
 
             {/* Months above, weekdays below — they share the 7 columns */}
             <div className="flex-7">
-              <div
-                role="group"
-                aria-label={t.monthsLabel}
-                className="mb-px grid grid-cols-7 sm:mb-1"
-              >
+              {/* No bottom margin, so a column's band runs unbroken from its
+                  topmost month straight down through the weekday grid. */}
+              <div role="group" aria-label={t.monthsLabel} className="grid grid-cols-7">
                 {Array.from({ length: monthRowCount }, (_, row) =>
                   Array.from({ length: 7 }, (_, col) => {
-                    const monthIndex = monthColumns[col][row];
-                    // A column holds one to three months, so most columns have
-                    // empty rows below theirs. Those empties still carry the
-                    // column's highlight: the band means "this column", not
-                    // "these months", and leaving a hole in it where no month
-                    // happens to sit made the crosshair look broken.
-                    if (monthIndex === undefined) {
-                      return (
-                        <div key={`m-${row}-${col}`} className={CELL}>
-                          <span
-                            className={`${TILE} ${activeCol === col ? 'bg-ios-blue-soft' : ''}`}
-                          />
-                        </div>
-                      );
-                    }
+                    // Columns hold one to three months and are packed to the
+                    // *bottom*, not the top. Top-packing left every short column
+                    // with empty cells immediately above the weekday grid, which
+                    // both stranded the months away from the axis they label and
+                    // put a hole in the middle of the column's band. Packed down,
+                    // the spare cells collect at the top of the block where
+                    // nothing needs to cross them.
+                    const months = monthColumns[col];
+                    const offset = monthRowCount - months.length;
+                    const monthIndex = row < offset ? undefined : months[row - offset];
+                    if (monthIndex === undefined) return <div key={`m-${row}-${col}`} className={CELL} />;
 
                     const isSelected = activeMonth === monthIndex;
                     const isCurrent = showToday && monthIndex === currentMonth;
                     const inActiveCol = activeCol === col;
+                    // The column's band starts at this column's first month and
+                    // continues down into the weekday grid, so only its top two
+                    // corners are ever outer ones.
+                    const corners = inActiveCol
+                      ? bandCorners(row === offset, true, false, true)
+                      : '';
                     // In a reverse lookup nothing was picked on this axis, so
                     // every month in the resolved column is part of the answer
                     // — and should read as one, not as faint context.
@@ -852,7 +925,7 @@ const CalendarBuilder = () => {
                         className={`${CELL} group select-none focus:outline-none`}
                       >
                         <span
-                          className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} overflow-hidden px-px font-semibold ${
+                          className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} ${corners} overflow-hidden px-px font-semibold ${
                             // While an answer set is on screen the "current
                             // month" marker stands down: two different meanings
                             // sharing one solid fill would read as one answer
@@ -869,7 +942,7 @@ const CalendarBuilder = () => {
                             isSelected || isAnswer
                               ? 'bg-ios-blue text-white'
                               : isCurrent
-                                ? `outline-2 -outline-offset-2 outline-ios-blue ${
+                                ? `rounded-lg outline-2 -outline-offset-2 outline-ios-blue ${
                                     inActiveCol ? 'bg-ios-blue-soft' : ''
                                   } text-ios-blue`
                                 : inActiveCol
@@ -911,6 +984,22 @@ const CalendarBuilder = () => {
                       const isTodayCell =
                         noSelection && showToday && row === todayRow && col === todayCol;
 
+                      // Both arms of the crosshair run through this block, so an
+                      // edge is outer only when the neighbour beyond it is unlit.
+                      // Row -1 is the month grid, which abuts this one and is lit
+                      // wherever the column is — so the band's top tip lives up
+                      // there, not here.
+                      const litAt = (r: number, c: number) =>
+                        r >= 0 && r < 7 && c >= 0 && c < 7 && (c === activeCol || r === activeRow);
+                      const corners = onCross
+                        ? bandCorners(
+                            row === 0 ? col !== activeCol : !litAt(row - 1, col),
+                            !litAt(row, col + 1),
+                            !litAt(row + 1, col),
+                            !litAt(row, col - 1),
+                          )
+                        : '';
+
                       return (
                         <button
                           key={`w-${row}-${col}`}
@@ -947,11 +1036,11 @@ const CalendarBuilder = () => {
                           className={`${CELL} group select-none focus:outline-none`}
                         >
                           <span
-                            className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
+                            className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} ${corners} font-medium ${
                               atIntersection
                                 ? 'bg-ios-blue font-semibold text-white'
                                 : isTodayCell
-                                  ? 'font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue'
+                                  ? 'rounded-lg font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue'
                                   : onCross
                                     ? 'bg-ios-blue-soft text-ios-blue'
                                     : weekdayIndex === 0
@@ -974,7 +1063,13 @@ const CalendarBuilder = () => {
         {/* Shortcuts sit with the other controls: below the grid on a phone,
             in the left rail on desktop. Placed before the footnote in the DOM so
             the reading order matches the visual order at both widths. */}
-        <div role="group" aria-label={t.presetsLabel} className="mt-3 flex flex-wrap gap-2 px-1 print:hidden lg:col-start-1 lg:row-start-4 lg:mt-0">
+        <div className="mt-4 print:hidden lg:col-start-1 lg:row-start-4 lg:mt-0">
+          <h2 className={SECTION_LABEL}>{t.presetsLabel}</h2>
+          <div
+            role="group"
+            aria-label={t.presetsLabel}
+            className="mt-1.5 flex flex-wrap gap-2 px-1"
+          >
           {/* The fast path in, for a reader who already knows the date and
               wants the grid to show them where it lives. A native date input
               rather than a parsed text field: it brings the iOS wheel and the
@@ -994,16 +1089,17 @@ const CalendarBuilder = () => {
               className="w-34 cursor-pointer appearance-none bg-transparent font-semibold tabular-nums text-ios-blue focus:outline-none"
             />
           </label>
-          {presets.map(({ key, label, apply }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={apply}
-              className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
-            >
-              {label}
-            </button>
-          ))}
+            {presets.map(({ key, label, apply }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={apply}
+                className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* iOS grouped-list footnote. Clear used to live here; it moved to the
@@ -1022,7 +1118,11 @@ const CalendarBuilder = () => {
               motion, and it cannot fight the "nothing moves" property the rest
               of the layout is built around. The worked example is computed from
               the year on screen, so it is never a stale illustration. */}
-          <details className="group mt-2 print:hidden">
+          <details
+            open={explainerOpen}
+            onToggle={e => setExplainerOpen(e.currentTarget.open)}
+            className="group mt-2 print:hidden"
+          >
             <summary
               className={`${PRESSABLE} ${FOCUS_RING} inline-flex cursor-pointer list-none items-center gap-1 rounded-full text-[12px] font-semibold text-ios-blue sm:text-[13px] [&::-webkit-details-marker]:hidden`}
             >
