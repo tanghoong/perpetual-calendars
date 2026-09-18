@@ -1,4 +1,7 @@
-import { defineConfig } from 'vite'
+import { createHash } from 'node:crypto'
+import { readdirSync, statSync } from 'node:fs'
+import { join, posix, relative, sep } from 'node:path'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -21,6 +24,98 @@ const siteUrl = (process.env.SITE_URL || 'https://tanghoong.github.io/perpetual-
   '',
 )
 
+/** Every file under `public/`, as the paths they are served at. */
+const publicFiles = (dir: string, root = dir): string[] =>
+  readdirSync(dir).flatMap(entry => {
+    const full = join(dir, entry)
+    return statSync(full).isDirectory()
+      ? publicFiles(full, root)
+      : [relative(root, full).split(sep).join(posix.sep)]
+  })
+
+/**
+ * Generates a service worker that precaches the whole build.
+ *
+ * Hand-written rather than `vite-plugin-pwa`, which would pull Workbox in to
+ * solve problems this app does not have: there is no API, no runtime data and
+ * no route it does not already ship. Everything it needs is known at build
+ * time, so the whole strategy is "cache all of it on install, serve from cache,
+ * drop the previous cache on activate".
+ *
+ * Offline was never blocked by the app needing the network *after* load — it
+ * does not. It was blocked by the browser having to fetch the app itself first,
+ * which nothing can skip without a service worker saying so.
+ */
+const serviceWorker = (): Plugin => ({
+  name: 'service-worker',
+  apply: 'build',
+  generateBundle(_options, bundle) {
+    const assets = [
+      '', // the shell, at the base path itself
+      'index.html',
+      ...Object.keys(bundle),
+      ...publicFiles('public'),
+    ]
+    // Stable order, so an unchanged build produces an unchanged cache name and
+    // returning visitors are not handed a pointless re-download.
+    const urls = [...new Set(assets.map(p => base + p))].sort()
+    const version = createHash('sha256').update(urls.join('\n')).digest('hex').slice(0, 12)
+
+    this.emitFile({
+      type: 'asset',
+      fileName: 'sw.js',
+      source: `// Generated at build time by vite.config.ts. Do not edit.
+const CACHE = 'one-page-calendar-${version}';
+const SHELL = ${JSON.stringify(base)};
+const PRECACHE = ${JSON.stringify(urls, null, 2)};
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      // One miss must not fail the whole install, or a single stale entry
+      // leaves the app with no offline copy at all.
+      .then(cache => Promise.allSettled(PRECACHE.map(url => cache.add(url))))
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Every view of this app is the same document with a different query string,
+  // so a navigation is always answered by the one cached shell. That is what
+  // makes a shared ?y=&m=&d= link open offline too.
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      caches.match(SHELL).then(cached => cached || fetch(request)),
+    );
+    return;
+  }
+
+  // Assets are content-hashed, so a hit is never stale. A miss goes to the
+  // network and is not written back: anything worth caching was precached, and
+  // caching the rest would grow without bound.
+  event.respondWith(caches.match(request).then(cached => cached || fetch(request)));
+});
+`,
+    })
+  },
+})
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
@@ -33,6 +128,7 @@ export default defineConfig({
       name: 'inject-site-url',
       transformIndexHtml: (html: string) => html.replaceAll('%SITE_URL%', siteUrl),
     },
+    serviceWorker(),
   ],
   base,
 })

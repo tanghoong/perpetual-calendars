@@ -80,14 +80,14 @@ Month and weekday labels switch between **English / 中文 / Melayu / Tiếng Vi
 | | |
 |---|---|
 | **Any year, one grid** | Step the year with ◀ / ▶, jump back with **Current Year**, or pick one of the same-grid years below. Only the month labels re-flow. |
-| **Today, triangulated** | The current month chip, today's date, and the weekday cell where they intersect are all highlighted at once. |
-| **Crosshair tracing** | Hover or tap any weekday cell and it lights its full row and column — plus the matching months above and the matching dates to the left. The relationship the layout encodes becomes visible instead of implied. |
+| **Today, triangulated** | The current month, today's date, and the weekday cell where they intersect are all marked at once — with an outline, not a fill. A fill is what a selection uses, and the two mean different things: selecting the 13th used to put two identical blue squares on screen, one meaning *the answer* and one meaning *today*. |
+| **Crosshair tracing** | Hover or tap any weekday cell and it lights its full row and column — plus the matching months above and the matching dates to the left. The cells are square and the grids have no gaps, so a lit row and column read as one continuous band meeting at a single filled square. That is the relationship the layout encodes, drawn rather than implied; circles could only ever meet at a point. |
 | **Tap to pin** | On touch devices a tap pins the crosshair until you tap again or press **Clear**, so the lookup survives lifting your finger. Cells are also `<button>`s, so Enter works — and the weekday block is one tab stop with arrow keys inside it, not 49. |
 | **31-day markers** | Months with 31 days are underlined, as is date `31` — a reminder that not every column runs to the bottom. |
 | **Elapsed dates dimmed, honestly** | In the current year, dates before today are greyed out — but only once a month is selected. The date block is shared by all 12 months, so a bare day-of-month comparison would dim the 3rd of December as readily as the 3rd of January; `isBeforeToday()` takes the month and returns `false` rather than guess when none is held. |
 | **Sunday in red** | Marked in every one of the seven row rotations, so the weekend edge stays findable wherever it lands. |
 | **4 languages** | **English / 中文 / Melayu / Tiếng Việt**, from a segmented control at the foot of the page or from `?lang=`. The control is a `<fieldset>` of real radio inputs, so it keeps native group semantics and native arrow-key navigation while looking like an iOS segmented control. It also sets `document.documentElement.lang`, which had been pinned to `en` while the page could already render all four. Month lengths and the Sunday column key off indices, not translated strings, so adding a language means adding one entry. |
-| **Mobile first, literally** | The 320px layout is the one the sizes are derived from — at that width each weekday column gets ~21px, which sets the cell metric everything else scales up from. Verified at 320/390/1024 in both appearances: zero horizontal overflow, and every cell measured as an exact circle. |
+| **Mobile first, literally** | The 320px layout is the one the sizes are derived from — at that width each weekday column gets ~21px, which sets the cell metric everything else scales up from. The row height then steps at `sm` and `lg` so the cell stays near-square as the container widens. Verified in-browser at 320/390/1024 in both appearances: zero horizontal overflow, measured, not assumed. |
 | **Two layouts, one DOM** | One column on a phone; from `lg`, the controls move into a left rail and the grid takes the width that frees. Placement is grid areas rather than duplicated markup, so tab order and screen-reader order stay the reading order at both widths. |
 | **Nothing moves** | The readout changes on every hover, and its companion line comes and goes. Both live in one height-reserved block, so no amount of pointer movement shifts anything below the heading. The reservations are measured, not guessed — 45/65/57px across the three breakpoints — and re-verified at 3 widths × 4 languages. |
 | **Works backwards** | The point of the layout. Any two of month, date and weekday fix the third, and all three are selectable — so it answers *"which months is the 15th a Wednesday?"* and *"which days in September are Fridays?"*, not just *"what day is 2 September?"*. A stack of twelve month-grids can only answer those by checking twelve grids; here the answer is one lit column or row. |
@@ -153,6 +153,7 @@ public/icon.svg                    ← app icon / favicon
 public/icon-*.png                  ← PWA icons, incl. maskable, + apple-touch-icon
 public/manifest.webmanifest        ← makes it installable
 public/og.png                      ← the 1200×630 link preview
+dist/sw.js                         ← generated at build time; precaches the bundle
 docs/DIRECTION.md                  ← where this is going, and the decisions still open
 .github/workflows/deploy.yml       ← lint, typecheck, build, publish to Pages
 .github/workflows/codeql.yml       ← CodeQL security analysis
@@ -191,6 +192,12 @@ Verified against a clean `npm ci`, with the app driven in a real browser.
 
 **10. No LICENSE.** Resolved — MIT.
 
+**11. Installable, but not offline.** Resolved. Offline was never blocked by the app needing the network *after* load — it makes no requests at all once running — but by the browser having to fetch the app itself first, which nothing can skip without a service worker.
+
+`sw.js` is generated at build time from the real bundle by a plugin in `vite.config.ts`, rather than by pulling in `vite-plugin-pwa` and Workbox to solve problems this app does not have: there is no API, no runtime data and no route it does not already ship, so the whole strategy is precache-on-install, serve-from-cache, drop-the-old-cache-on-activate. Navigations are answered from the one cached shell, which is what makes a shared `?y=&m=&d=` link open offline too.
+
+Verified by driving a real browser: 11 entries cached, then the network cut **and** the HTTP cache disabled, and a deep link still rendered the full grid.
+
 ### Open
 
 **5. Accessibility: the last mile.** The 7×7 block is now a real `role="grid"` with `role="row"` wrappers (via `display: contents`, so the semantics cost no box), `aria-rowindex`/`aria-colindex`, and a roving tabindex so the whole block is one tab stop with arrow keys inside it. The heading remains an `aria-live` readout, so moving through cells announces the resolved date rather than a bare weekday.
@@ -198,8 +205,6 @@ Verified against a clean `npm ci`, with the app driven in a real browser.
 What is still missing is **header association**: a screen reader is told the cell's coordinates but not that column 3 *is* December and row 4 *is* the 25th, because the month and date blocks are separate DOM subtrees and cannot be `headers`-associated without collapsing the three blocks back into one table — which is the layout this design deliberately moved away from. Those two blocks are therefore `role="group"`, not `role="grid"`: claiming grid semantics without implementing the keyboard pattern they oblige would be a worse lie than claiming none.
 
 State is also still conveyed largely by colour.
-
-**11. Installable, but not offline.** There is a manifest and there are icons, but no service worker — so the app can be added to a Home Screen and will still fail without a network. For a page with zero network calls after load, that is the cheapest remaining win.
 
 **12. The week starts on Sunday, and that is hardcoded.** `0 = Sunday` runs through the seven rotations, the red Sunday column and the calendar-type vocabulary. Three of the four shipped languages sit in Monday-start or mixed-convention regions. This should become a setting before more of the type vocabulary hardens around it.
 

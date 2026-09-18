@@ -73,38 +73,43 @@ const withAxis = (s: Pinned, axis: Axis, value: number | null): Pinned =>
       ? { ...s, date: value }
       : { ...s, weekday: value };
 
-// Every cell is a fixed-height row box holding a square disc. The split matters:
+// Every cell is a fixed-height row box holding the painted tile. The split
+// matters:
 //
 //   CELL fixes the row height, which is what keeps the 5-column date block and
 //   the 7-column weekday block on the same baseline — their column widths differ
 //   by a hair because they divide their gaps differently, so anything that let
 //   height follow width would drift the two blocks apart down the grid.
 //
-//   DISC takes its width from the column and its height from `aspect-square`, so
-//   the filled shape is a true circle at every viewport rather than the oval a
-//   `rounded-full` box wider or taller than itself produces.
+//   TILE is the painted shape, and it fills the cell exactly: full width, full
+//   height, square corners. It used to be a circle sized off `aspect-square`,
+//   which had two problems. The cosmetic one: circles can only meet at a point,
+//   so a lit row read as a row of separate dots rather than as a row. The
+//   structural one: taking height from *column* width meant the shape outgrew
+//   its fixed row wherever a column got wide, which is what happens on the
+//   desktop layout — and the month chips overlapped each other.
 //
-//   The `max-w` is what keeps that honest. This used to rely on the column
-//   always being narrower than the row was tall, which held on a phone and did
-//   not on the desktop layout: there the grid takes the width the left rail
-//   frees, each of the seven columns gets ~52px against a 36px row, and the
-//   discs grew past their rows until the month chips visibly overlapped each
-//   other. Capping the width at the row height fixes it at every width and
-//   costs nothing at the narrow ones, where the column is the binding limit
-//   anyway.
+//   Filling the cell fixes both, and the grids then drop their gaps entirely so
+//   the tiles abut. That is what makes the crosshair read as one continuous band
+//   through the grid rather than a dotted line of hints — which is what the
+//   layout actually means. Rounding belongs to the controls around the grid;
+//   inside it, square corners are what let the band close up. Nothing is lost by
+//   removing the gaps, because an unlit tile paints nothing: the separation that
+//   used to come from gaps now comes from there being no fill to separate.
 //
-// Splitting them also keeps the tap target at the full row height while the
-// visible circle stays honest — on a phone the target is 32px tall where the
-// circle is only ~23px across.
+// Splitting CELL from TILE still keeps the tap target at the full row height.
 //
-// The mobile values are the binding constraint, not the desktop ones: at 320px
-// each of the seven weekday columns gets ~21px, which 10px tracking-tight text
-// fits and 11px does not. Everything scales up from there.
-const CELL = 'flex h-8 w-full items-center justify-center sm:h-9';
-const DISC =
-  'flex aspect-square w-full max-w-8 items-center justify-center rounded-full transition-colors sm:max-w-9';
-const DATE_TEXT = 'text-[11px] sm:text-[13px]';
-const LABEL_TEXT = 'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal';
+// The row height steps with the breakpoint so the cell stays near-square at each
+// one — the grid's width comes from its container, and only the height is ours
+// to pick. At 320px each of the seven weekday columns gets ~21px against a 32px
+// row, and 10px tracking-tight text fits where 11px does not; at `sm` the 32rem
+// cap puts the column at ~36px against a 36px row; on the desktop layout the
+// card is wider, so the row grows to 48 to meet it.
+const CELL = 'flex h-8 w-full items-center justify-center sm:h-9 lg:h-12';
+const TILE = 'flex h-full w-full items-center justify-center transition-colors';
+const DATE_TEXT = 'text-[11px] sm:text-[13px] lg:text-[15px]';
+const LABEL_TEXT =
+  'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal lg:text-[14px]';
 
 // iOS control surface: dims on press rather than flashing a highlight.
 const PRESSABLE = 'select-none transition active:opacity-55';
@@ -708,7 +713,7 @@ const CalendarBuilder = () => {
                   classes, so both blocks start on the same line at every
                   breakpoint without hard-coded offsets. The otherwise dead
                   corner carries the axis label. */}
-              <div className="mb-px grid grid-cols-5 gap-0.5 sm:mb-1 sm:gap-1">
+              <div className="mb-px grid grid-cols-5 sm:mb-1">
                 {Array.from({ length: (monthRowCount - 1) * 5 }, (_, i) => (
                   <div key={`pad-${i}`} className={CELL} />
                 ))}
@@ -728,7 +733,7 @@ const CalendarBuilder = () => {
               <div
                 role="group"
                 aria-label={t.dateGridLabel}
-                className="grid grid-cols-5 gap-0.5 sm:gap-1"
+                className="grid grid-cols-5"
               >
                 {Array.from({ length: 7 }, (_, row) =>
                   Array.from({ length: 5 }, (_, col) => {
@@ -764,15 +769,25 @@ const CalendarBuilder = () => {
                       >
                         <span
                           aria-current={isToday ? 'date' : undefined}
-                          className={`${DISC} ${DATE_TEXT} ${CELL_FOCUS} font-medium tabular-nums ${
+                          className={`${TILE} ${DATE_TEXT} ${CELL_FOCUS} font-medium tabular-nums ${
                             outOfRange
                               ? 'text-ios-label-3 line-through decoration-1 opacity-40'
                               : isSelected || isAnswer
                                 ? 'bg-ios-blue font-semibold text-white'
-                                : isToday && !answering
-                                  ? 'bg-ios-blue font-semibold text-white'
+                                : // Today is a ring, not a fill. It used to take
+                                  // the same solid blue the selection takes, so
+                                  // selecting the 13th put two identical blue
+                                  // squares in the block meaning two different
+                                  // things — the answer, and today. An outline
+                                  // never competes with a fill, so today stays
+                                  // findable in every state instead of having to
+                                  // stand down whenever something is selected.
+                                  isToday
+                                  ? `font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue ${
+                                      inActiveRow ? 'bg-ios-blue-soft' : ''
+                                    }`
                                   : inActiveRow
-                                    ? 'bg-ios-blue-mid text-ios-blue'
+                                    ? 'bg-ios-blue-soft text-ios-blue'
                                     : isPast
                                       ? 'text-ios-label-3'
                                       : 'text-ios-label-2 group-hover:bg-ios-fill'
@@ -792,12 +807,25 @@ const CalendarBuilder = () => {
               <div
                 role="group"
                 aria-label={t.monthsLabel}
-                className="mb-px grid grid-cols-7 gap-0.5 sm:mb-1 sm:gap-1"
+                className="mb-px grid grid-cols-7 sm:mb-1"
               >
                 {Array.from({ length: monthRowCount }, (_, row) =>
                   Array.from({ length: 7 }, (_, col) => {
                     const monthIndex = monthColumns[col][row];
-                    if (monthIndex === undefined) return <div key={`m-${row}-${col}`} />;
+                    // A column holds one to three months, so most columns have
+                    // empty rows below theirs. Those empties still carry the
+                    // column's highlight: the band means "this column", not
+                    // "these months", and leaving a hole in it where no month
+                    // happens to sit made the crosshair look broken.
+                    if (monthIndex === undefined) {
+                      return (
+                        <div key={`m-${row}-${col}`} className={CELL}>
+                          <span
+                            className={`${TILE} ${activeCol === col ? 'bg-ios-blue-soft' : ''}`}
+                          />
+                        </div>
+                      );
+                    }
 
                     const isSelected = activeMonth === monthIndex;
                     const isCurrent = showToday && monthIndex === currentMonth;
@@ -824,16 +852,29 @@ const CalendarBuilder = () => {
                         className={`${CELL} group select-none focus:outline-none`}
                       >
                         <span
-                          className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} overflow-hidden px-px font-semibold ${
+                          className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} overflow-hidden px-px font-semibold ${
                             // While an answer set is on screen the "current
                             // month" marker stands down: two different meanings
                             // sharing one solid fill would read as one answer
                             // set with a stray extra member.
-                            isSelected || isAnswer || (isCurrent && !answering)
+                            //
+                            // Unlit months carry no fill. They used to, which
+                            // was fine while each chip was a separate circle and
+                            // wrong the moment they became squares: twelve tinted
+                            // squares abutting each other stopped reading as
+                            // twelve chips and started reading as one blue slab,
+                            // and a highlight inside a slab says nothing. Blue
+                            // text alone still tells the month block apart from
+                            // the grey weekday block below it.
+                            isSelected || isAnswer
                               ? 'bg-ios-blue text-white'
-                              : inActiveCol
-                                ? 'bg-ios-blue-mid text-ios-blue'
-                                : 'bg-ios-blue-soft text-ios-blue'
+                              : isCurrent
+                                ? `outline-2 -outline-offset-2 outline-ios-blue ${
+                                    inActiveCol ? 'bg-ios-blue-soft' : ''
+                                  } text-ios-blue`
+                                : inActiveCol
+                                  ? 'bg-ios-blue-soft text-ios-blue'
+                                  : 'text-ios-blue group-hover:bg-ios-fill'
                           } ${
                             MONTHS_WITH_31_DAYS.has(monthIndex)
                               ? 'underline decoration-2 underline-offset-2'
@@ -858,7 +899,7 @@ const CalendarBuilder = () => {
                 aria-label={t.weekdayGridLabel}
                 aria-rowcount={7}
                 aria-colcount={7}
-                className="grid grid-cols-7 gap-0.5 sm:gap-1"
+                className="grid grid-cols-7"
               >
                 {Array.from({ length: 7 }, (_, row) => (
                   <div key={`wr-${row}`} role="row" aria-rowindex={row + 1} className="contents">
@@ -906,14 +947,16 @@ const CalendarBuilder = () => {
                           className={`${CELL} group select-none focus:outline-none`}
                         >
                           <span
-                            className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
-                              atIntersection || isTodayCell
+                            className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
+                              atIntersection
                                 ? 'bg-ios-blue font-semibold text-white'
-                                : onCross
-                                  ? 'bg-ios-blue-soft text-ios-blue'
-                                  : weekdayIndex === 0
-                                    ? 'text-ios-red group-hover:bg-ios-fill'
-                                    : 'text-ios-label-2 group-hover:bg-ios-fill'
+                                : isTodayCell
+                                  ? 'font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue'
+                                  : onCross
+                                    ? 'bg-ios-blue-soft text-ios-blue'
+                                    : weekdayIndex === 0
+                                      ? 'text-ios-red group-hover:bg-ios-fill'
+                                      : 'text-ios-label-2 group-hover:bg-ios-fill'
                             }`}
                           >
                             {t.weekdays[weekdayIndex]}
@@ -997,6 +1040,13 @@ const CalendarBuilder = () => {
               {t.worked}: <span className="font-semibold text-ios-label-2">{example.date}</span>{' '}
               <span aria-hidden="true">→</span>{' '}
               <span className="font-semibold text-ios-blue">{example.weekday}</span>
+            </p>
+            {/* The one mark on the grid that does not explain itself. It was
+                documented only in the README, which is not where someone looking
+                at the grid is. */}
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              <span className="underline decoration-2 underline-offset-2">{t.months[0]}</span>{' '}
+              {t.markerNote}
             </p>
           </details>
         </div>

@@ -43,6 +43,8 @@ export interface Translation {
   stepDate: string;
   stepCross: string;
   worked: string;
+  /** What the underline under a month (and under 31) means. */
+  markerNote: string;
   /** Accessible names for the three blocks, once they carry grid semantics. */
   monthsLabel: string;
   weekdayGridLabel: string;
@@ -118,6 +120,7 @@ export const translations: Record<Language, Translation> = {
     stepDate: 'Find the date — note its row.',
     stepCross: 'The weekday where they cross is the answer.',
     worked: 'For example',
+    markerNote: 'An underline marks a month with 31 days — and the 31st itself.',
     monthsLabel: 'Months',
     weekdayGridLabel: 'Weekdays',
     dateGridLabel: 'Dates',
@@ -158,6 +161,7 @@ export const translations: Record<Language, Translation> = {
     stepDate: '找到日期 — 记住它所在的行。',
     stepCross: '行列交叉处的星期就是答案。',
     worked: '例如',
+    markerNote: '下划线表示这个月有 31 天 — 日期栏的 31 同理。',
     monthsLabel: '月份',
     weekdayGridLabel: '星期',
     dateGridLabel: '日期',
@@ -197,6 +201,7 @@ export const translations: Record<Language, Translation> = {
     stepDate: 'Cari tarikh — perhatikan barisnya.',
     stepCross: 'Hari di tempat keduanya bersilang ialah jawapannya.',
     worked: 'Contohnya',
+    markerNote: 'Garis bawah menandakan bulan berhari 31 — dan tarikh 31 itu sendiri.',
     monthsLabel: 'Bulan',
     weekdayGridLabel: 'Hari',
     dateGridLabel: 'Tarikh',
@@ -236,6 +241,7 @@ export const translations: Record<Language, Translation> = {
     stepDate: 'Tìm ngày — ghi nhớ hàng của nó.',
     stepCross: 'Thứ ở chỗ hai bên giao nhau là đáp án.',
     worked: 'Ví dụ',
+    markerNote: 'Gạch chân đánh dấu tháng có 31 ngày — và chính ngày 31.',
     monthsLabel: 'Tháng',
     weekdayGridLabel: 'Thứ',
     dateGridLabel: 'Ngày',
