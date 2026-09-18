@@ -37,6 +37,12 @@ export interface Translation {
   /** Direct date entry. */
   goToDate: string;
   print: string;
+  /** The collapsible explainer, for a reader meeting this layout cold. */
+  howToRead: string;
+  stepMonth: string;
+  stepDate: string;
+  stepCross: string;
+  worked: string;
   /** Accessible names for the three blocks, once they carry grid semantics. */
   monthsLabel: string;
   weekdayGridLabel: string;
@@ -107,6 +113,11 @@ export const translations: Record<Language, Translation> = {
     yearTypeNav: 'Years sharing this grid',
     goToDate: 'Go to date',
     print: 'Print',
+    howToRead: 'How to read it',
+    stepMonth: 'Find the month — note its column.',
+    stepDate: 'Find the date — note its row.',
+    stepCross: 'The weekday where they cross is the answer.',
+    worked: 'For example',
     monthsLabel: 'Months',
     weekdayGridLabel: 'Weekdays',
     dateGridLabel: 'Dates',
@@ -142,6 +153,11 @@ export const translations: Record<Language, Translation> = {
     yearTypeNav: '同版面的年份',
     goToDate: '跳转到日期',
     print: '打印',
+    howToRead: '怎么看这张表',
+    stepMonth: '找到月份 — 记住它所在的列。',
+    stepDate: '找到日期 — 记住它所在的行。',
+    stepCross: '行列交叉处的星期就是答案。',
+    worked: '例如',
     monthsLabel: '月份',
     weekdayGridLabel: '星期',
     dateGridLabel: '日期',
@@ -176,6 +192,11 @@ export const translations: Record<Language, Translation> = {
     yearTypeNav: 'Tahun dengan susunan sama',
     goToDate: 'Pergi ke tarikh',
     print: 'Cetak',
+    howToRead: 'Cara membacanya',
+    stepMonth: 'Cari bulan — perhatikan lajurnya.',
+    stepDate: 'Cari tarikh — perhatikan barisnya.',
+    stepCross: 'Hari di tempat keduanya bersilang ialah jawapannya.',
+    worked: 'Contohnya',
     monthsLabel: 'Bulan',
     weekdayGridLabel: 'Hari',
     dateGridLabel: 'Tarikh',
@@ -210,6 +231,11 @@ export const translations: Record<Language, Translation> = {
     yearTypeNav: 'Các năm cùng bố cục',
     goToDate: 'Đến ngày',
     print: 'In',
+    howToRead: 'Cách đọc bảng này',
+    stepMonth: 'Tìm tháng — ghi nhớ cột của nó.',
+    stepDate: 'Tìm ngày — ghi nhớ hàng của nó.',
+    stepCross: 'Thứ ở chỗ hai bên giao nhau là đáp án.',
+    worked: 'Ví dụ',
     monthsLabel: 'Tháng',
     weekdayGridLabel: 'Thứ',
     dateGridLabel: 'Ngày',

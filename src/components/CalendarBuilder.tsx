@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowCounterclockwise,
   Checkmark,
@@ -26,6 +26,7 @@ import {
   sameGridYears,
   startWeekdayOfType,
   weekdayAt,
+  weekdayOf,
 } from '../lib/calendar';
 import { formatDate, formatList } from '../lib/format';
 import { fill, LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
@@ -81,9 +82,16 @@ const withAxis = (s: Pinned, axis: Axis, value: number | null): Pinned =>
 //
 //   DISC takes its width from the column and its height from `aspect-square`, so
 //   the filled shape is a true circle at every viewport rather than the oval a
-//   `rounded-full` box wider or taller than itself produces. Column width is
-//   always the smaller of the two dimensions here (max ~32px against a 36px row),
-//   so the disc can never outgrow its row.
+//   `rounded-full` box wider or taller than itself produces.
+//
+//   The `max-w` is what keeps that honest. This used to rely on the column
+//   always being narrower than the row was tall, which held on a phone and did
+//   not on the desktop layout: there the grid takes the width the left rail
+//   frees, each of the seven columns gets ~52px against a 36px row, and the
+//   discs grew past their rows until the month chips visibly overlapped each
+//   other. Capping the width at the row height fixes it at every width and
+//   costs nothing at the narrow ones, where the column is the binding limit
+//   anyway.
 //
 // Splitting them also keeps the tap target at the full row height while the
 // visible circle stays honest — on a phone the target is 32px tall where the
@@ -93,7 +101,8 @@ const withAxis = (s: Pinned, axis: Axis, value: number | null): Pinned =>
 // each of the seven weekday columns gets ~21px, which 10px tracking-tight text
 // fits and 11px does not. Everything scales up from there.
 const CELL = 'flex h-8 w-full items-center justify-center sm:h-9';
-const DISC = 'flex aspect-square w-full items-center justify-center rounded-full transition-colors';
+const DISC =
+  'flex aspect-square w-full max-w-8 items-center justify-center rounded-full transition-colors sm:max-w-9';
 const DATE_TEXT = 'text-[11px] sm:text-[13px]';
 const LABEL_TEXT = 'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal';
 
@@ -370,6 +379,101 @@ const CalendarBuilder = () => {
     if (e.pointerType === 'mouse') setHovered(s => ({ ...s, ...selection }));
   };
 
+  /**
+   * Roving tabindex over the 7x7 weekday block.
+   *
+   * Every cell was a tab stop, which put 49 of them in this block alone and 99
+   * across the page — so reaching the grid's far corner by keyboard took more
+   * presses than reading the answer off a wall calendar would have. The ARIA
+   * grid pattern is one tab stop for the whole block, with the arrows moving
+   * inside it.
+   *
+   * Movement wraps, which is not the usual choice but is the right one here:
+   * this block *is* a cyclic group. Row r is the week rotated left by r and
+   * column c likewise, so stepping off the last column onto the first is the
+   * same relationship every other step expresses, not an edge case.
+   */
+  const [roving, setRoving] = useState({ row: 0, col: 0 });
+  const cellRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  const moveRoving = (row: number, col: number) => {
+    setRoving({ row, col });
+    cellRefs.current.get(`${row}-${col}`)?.focus();
+  };
+
+  const STEPS: Record<string, [number, number]> = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+  };
+
+  const onGridKeyDown = (e: React.KeyboardEvent, row: number, col: number) => {
+    const step = STEPS[e.key];
+    if (step) {
+      e.preventDefault();
+      moveRoving((row + step[0] + 7) % 7, (col + step[1] + 7) % 7);
+      return;
+    }
+    if (e.key === 'Home') {
+      e.preventDefault();
+      moveRoving(e.ctrlKey ? 0 : row, 0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      moveRoving(e.ctrlKey ? 6 : row, 6);
+    }
+  };
+
+  // The tab stop follows the selection where there is one, so tabbing back into
+  // the grid returns to the cell the reader was last working with rather than
+  // to the corner.
+  const rovingRow = pinnedCross.row ?? roving.row;
+  const rovingCol = pinnedCross.col ?? roving.col;
+
+  /**
+   * Jumps to a whole date at once, from the platform's own date picker.
+   *
+   * A native `<input type="date">` rather than parsed text: it brings the iOS
+   * wheel and the Android calendar for free, validates itself, and renders in
+   * the reader's own locale order — none of which four hand-written parsers
+   * would have got right.
+   */
+  const goToDate = (value: string) => {
+    // Empty is the clear button inside the native control.
+    if (value === '') {
+      clear();
+      return;
+    }
+    const [y, m, d] = value.split('-').map(Number);
+    if (!Number.isInteger(y) || y < MIN_YEAR || y > MAX_YEAR) return;
+    setYear(y);
+    setPinned({ month: m - 1, date: d, weekday: null, order: ['month', 'date'] });
+  };
+
+  /**
+   * The explainer's worked example, computed rather than written.
+   *
+   * Christmas is the date the README has always used, but the point here is
+   * only that it is a fixed date whose weekday moves with the year — so the
+   * illustration stays true when the reader steps the year, which a hardcoded
+   * "Dec 25 is a Friday" would not.
+   */
+  const example = {
+    // LOCALES[language] rather than the `locale` binding below: this runs at its
+    // own declaration, which is above that one.
+    date: formatDate(LOCALES[language], 'dayMonthShort', new Date(year, 11, 25)),
+    weekday: t.weekdaysLong[weekdayOf(year, 11, 25)],
+  };
+
+  // The control shows a date only when one is actually pinned; a hover must not
+  // rewrite the input under the reader's cursor.
+  const dateInputValue =
+    pinned.month !== null && pinned.date !== null
+      ? `${String(year).padStart(4, '0')}-${String(pinned.month + 1).padStart(2, '0')}-${String(
+          pinned.date,
+        ).padStart(2, '0')}`
+      : '';
+
 
   // The heading is the lookup, and which of the three questions it answers
   // depends on which two axes are held. The two reverse cases are the ones a
@@ -464,12 +568,22 @@ const CalendarBuilder = () => {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 lg:col-start-1 lg:row-start-2 lg:mt-0">
+          {/* On paper the year has to be stated, not sat inside a <select> the
+              printer renders as an empty box. This is also the only place the
+              sheet says what it is: a year, its type, and — from the strip at
+              the foot — the other years it is equally valid for. */}
+          <p className="hidden text-[20px] font-bold tabular-nums print:block">
+            {year}{' '}
+            <span className="text-[14px] font-medium">
+              · {typePhrase} ({dominicalLetterOf(calendarType)})
+            </span>
+          </p>
           {/* Year stepper, shaped like an iOS stepper: one filled pill track
               carrying two round glyph buttons with the value between them. The
               value is itself a <select> — a native picker is the fast path off
               the current year, and on iOS it opens the system wheel, so a jump
               of forty years is one gesture instead of forty taps. */}
-          <div className="flex shrink-0 items-center rounded-full bg-ios-fill p-1 text-[17px]">
+          <div className="flex shrink-0 items-center rounded-full bg-ios-fill p-1 text-[17px] print:hidden">
             <button
               type="button"
               onClick={() => setYear(y => Math.max(MIN_YEAR, y - 1))}
@@ -507,7 +621,7 @@ const CalendarBuilder = () => {
           {/* The header's right half carries both transient actions, which is
               also where iOS puts a navigation bar's trailing controls. Clear is
               icon-only so the two fit at 320px in the longest language. */}
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2 print:hidden">
             {!showToday && (
               <button
                 type="button"
@@ -551,7 +665,7 @@ const CalendarBuilder = () => {
         <div
           role="group"
           aria-label={t.weekdayLabel}
-          className="mt-3 grid grid-cols-7 gap-1 lg:col-start-1 lg:row-start-3 lg:mt-0 lg:grid-cols-4"
+          className="mt-3 grid grid-cols-7 gap-1 print:hidden lg:col-start-1 lg:row-start-3 lg:mt-0 lg:grid-cols-4"
         >
           {t.weekdays.map((label, weekday) => {
             const isOn = activeWeekday === weekday;
@@ -581,7 +695,7 @@ const CalendarBuilder = () => {
 
         {/* Grouped-content card */}
         <div
-          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
+          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 print:break-inside-avoid print:border print:border-black/10 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
           onPointerLeave={() => setHovered(EMPTY)}
         >
           {/* Two blocks side by side, sized 5:7 to match their column counts.
@@ -605,7 +719,17 @@ const CalendarBuilder = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-5 gap-0.5 sm:gap-1">
+              {/* A named group rather than a second `role="grid"`. The 7x7
+                  block below is a grid because its cells are an intersection
+                  and it implements the arrow-key pattern that role obliges;
+                  these are 31 independent targets with their own meaning, and
+                  claiming grid semantics without the keyboard behaviour would
+                  be a worse lie than claiming none. */}
+              <div
+                role="group"
+                aria-label={t.dateGridLabel}
+                className="grid grid-cols-5 gap-0.5 sm:gap-1"
+              >
                 {Array.from({ length: 7 }, (_, row) =>
                   Array.from({ length: 5 }, (_, col) => {
                     const num = dateAt(row, col);
@@ -665,7 +789,11 @@ const CalendarBuilder = () => {
 
             {/* Months above, weekdays below — they share the 7 columns */}
             <div className="flex-7">
-              <div className="mb-px grid grid-cols-7 gap-0.5 sm:mb-1 sm:gap-1">
+              <div
+                role="group"
+                aria-label={t.monthsLabel}
+                className="mb-px grid grid-cols-7 gap-0.5 sm:mb-1 sm:gap-1"
+              >
                 {Array.from({ length: monthRowCount }, (_, row) =>
                   Array.from({ length: 7 }, (_, col) => {
                     const monthIndex = monthColumns[col][row];
@@ -720,53 +848,81 @@ const CalendarBuilder = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
-                {Array.from({ length: 7 }, (_, row) =>
-                  Array.from({ length: 7 }, (_, col) => {
-                    const weekdayIndex = weekdayAt(row, col);
-                    const onCross = activeRow === row || activeCol === col;
-                    const atIntersection = activeRow === row && activeCol === col;
-                    const noSelection = activeRow === null && activeCol === null;
-                    const isTodayCell =
-                      noSelection && showToday && row === todayRow && col === todayCol;
+              {/* A real ARIA grid, not just a CSS one. The layout has always
+                  been an intersection of a date row and a month column, and a
+                  screen reader was never told so — which was the single thing
+                  it most needed to know about this design. The row wrappers use
+                  `contents`, so they add the semantics without adding a box. */}
+              <div
+                role="grid"
+                aria-label={t.weekdayGridLabel}
+                aria-rowcount={7}
+                aria-colcount={7}
+                className="grid grid-cols-7 gap-0.5 sm:gap-1"
+              >
+                {Array.from({ length: 7 }, (_, row) => (
+                  <div key={`wr-${row}`} role="row" aria-rowindex={row + 1} className="contents">
+                    {Array.from({ length: 7 }, (_, col) => {
+                      const weekdayIndex = weekdayAt(row, col);
+                      const onCross = activeRow === row || activeCol === col;
+                      const atIntersection = activeRow === row && activeCol === col;
+                      const noSelection = activeRow === null && activeCol === null;
+                      const isTodayCell =
+                        noSelection && showToday && row === todayRow && col === todayCol;
 
-                    return (
-                      <button
-                        key={`w-${row}-${col}`}
-                        type="button"
-                        aria-pressed={atIntersection}
-                        // Name is the weekday alone. The pressed state travels on
-                        // aria-pressed, which assistive tech announces in the
-                        // user's own locale — spelling it out here would both
-                        // duplicate that and hardcode English into a localized name.
-                        aria-label={t.weekdaysLong[weekdayIndex]}
-                        onPointerEnter={e => hoverIfMouse(e, selectionForCell(row, col))}
-                        onFocus={() => setHovered(selectionForCell(row, col))}
-                        onBlur={() => setHovered(EMPTY)}
-                        onClick={() => toggleCell(row, col)}
-                        // The button keeps the full row height as its tap
-                        // target; the disc inside is what gets painted. Focus
-                        // and hover are therefore forwarded to the disc, so the
-                        // ring traces the circle rather than the taller box.
-                        className={`${CELL} group select-none focus:outline-none`}
-                      >
-                        <span
-                          className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
-                            atIntersection || isTodayCell
-                              ? 'bg-ios-blue font-semibold text-white'
-                              : onCross
-                                ? 'bg-ios-blue-soft text-ios-blue'
-                                : weekdayIndex === 0
-                                  ? 'text-ios-red group-hover:bg-ios-fill'
-                                  : 'text-ios-label-2 group-hover:bg-ios-fill'
-                          }`}
+                      return (
+                        <button
+                          key={`w-${row}-${col}`}
+                          ref={el => {
+                            cellRefs.current.set(`${row}-${col}`, el);
+                          }}
+                          type="button"
+                          role="gridcell"
+                          aria-colindex={col + 1}
+                          aria-pressed={atIntersection}
+                          // One tab stop for the whole block; the arrows do the
+                          // rest. Without this the grid alone was 49 of the
+                          // page's 99 tab stops.
+                          tabIndex={row === rovingRow && col === rovingCol ? 0 : -1}
+                          // Name is the weekday alone. The pressed state travels on
+                          // aria-pressed, which assistive tech announces in the
+                          // user's own locale — spelling it out here would both
+                          // duplicate that and hardcode English into a localized name.
+                          // Where the cell *sits* now travels on the row and column
+                          // indices instead, which is the part that was missing.
+                          aria-label={t.weekdaysLong[weekdayIndex]}
+                          onKeyDown={e => onGridKeyDown(e, row, col)}
+                          onPointerEnter={e => hoverIfMouse(e, selectionForCell(row, col))}
+                          onFocus={() => {
+                            setRoving({ row, col });
+                            setHovered(selectionForCell(row, col));
+                          }}
+                          onBlur={() => setHovered(EMPTY)}
+                          onClick={() => toggleCell(row, col)}
+                          // The button keeps the full row height as its tap
+                          // target; the disc inside is what gets painted. Focus
+                          // and hover are therefore forwarded to the disc, so the
+                          // ring traces the circle rather than the taller box.
+                          className={`${CELL} group select-none focus:outline-none`}
                         >
-                          {t.weekdays[weekdayIndex]}
-                        </span>
-                      </button>
-                    );
-                  }),
-                )}
+                          <span
+                            className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
+                              atIntersection || isTodayCell
+                                ? 'bg-ios-blue font-semibold text-white'
+                                : onCross
+                                  ? 'bg-ios-blue-soft text-ios-blue'
+                                  : weekdayIndex === 0
+                                    ? 'text-ios-red group-hover:bg-ios-fill'
+                                    : 'text-ios-label-2 group-hover:bg-ios-fill'
+                            }`}
+                          >
+                            {t.weekdays[weekdayIndex]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -775,7 +931,26 @@ const CalendarBuilder = () => {
         {/* Shortcuts sit with the other controls: below the grid on a phone,
             in the left rail on desktop. Placed before the footnote in the DOM so
             the reading order matches the visual order at both widths. */}
-        <div role="group" aria-label={t.presetsLabel} className="mt-3 flex flex-wrap gap-2 px-1 lg:col-start-1 lg:row-start-4 lg:mt-0">
+        <div role="group" aria-label={t.presetsLabel} className="mt-3 flex flex-wrap gap-2 px-1 print:hidden lg:col-start-1 lg:row-start-4 lg:mt-0">
+          {/* The fast path in, for a reader who already knows the date and
+              wants the grid to show them where it lives. A native date input
+              rather than a parsed text field: it brings the iOS wheel and the
+              Android calendar, validates itself against the bounds, and lays
+              its fields out in the reader's own locale order — none of which
+              four hand-written parsers would have got right. */}
+          <label
+            className={`${PRESSABLE} flex items-center gap-1.5 rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ios-blue sm:text-[13px] print:hidden`}
+          >
+            <span className="sr-only">{t.goToDate}</span>
+            <input
+              type="date"
+              value={dateInputValue}
+              min={`${MIN_YEAR}-01-01`}
+              max={`${MAX_YEAR}-12-31`}
+              onChange={e => goToDate(e.target.value)}
+              className="w-34 cursor-pointer appearance-none bg-transparent font-semibold tabular-nums text-ios-blue focus:outline-none"
+            />
+          </label>
           {presets.map(({ key, label, apply }) => (
             <button
               key={key}
@@ -790,9 +965,41 @@ const CalendarBuilder = () => {
 
         {/* iOS grouped-list footnote. Clear used to live here; it moved to the
             header, so this is now purely the instruction. */}
-        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:mt-4 sm:text-[13px] lg:col-start-1 lg:row-start-5 lg:mt-0">
-          {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
-        </p>
+        <div className="mt-3 px-1 sm:mt-4 lg:col-start-1 lg:row-start-5 lg:mt-0">
+          <p className="text-[12px] leading-relaxed text-ios-label-2 sm:text-[13px] print:hidden">
+            {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
+          </p>
+
+          {/* The layout is unusual enough that a first-time reader sees an
+              abstract grid of abbreviations rather than a lookup table. The
+              one-line hint above says what to do; this says how it works, and
+              closes again so it costs a returning reader nothing.
+
+              A <details> rather than a tour or an animation: no JavaScript, no
+              motion, and it cannot fight the "nothing moves" property the rest
+              of the layout is built around. The worked example is computed from
+              the year on screen, so it is never a stale illustration. */}
+          <details className="group mt-2 print:hidden">
+            <summary
+              className={`${PRESSABLE} ${FOCUS_RING} inline-flex cursor-pointer list-none items-center gap-1 rounded-full text-[12px] font-semibold text-ios-blue sm:text-[13px] [&::-webkit-details-marker]:hidden`}
+            >
+              <span className="inline-block transition-transform group-open:rotate-90">
+                <ChevronRight className="h-[0.9em] w-[0.9em]" />
+              </span>
+              {t.howToRead}
+            </summary>
+            <ol className="mt-2 list-inside list-decimal space-y-1 text-[12px] leading-relaxed text-ios-label-2 sm:text-[13px]">
+              <li>{t.stepMonth}</li>
+              <li>{t.stepDate}</li>
+              <li>{t.stepCross}</li>
+            </ol>
+            <p className="mt-2 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.worked}: <span className="font-semibold text-ios-label-2">{example.date}</span>{' '}
+              <span aria-hidden="true">→</span>{' '}
+              <span className="font-semibold text-ios-blue">{example.weekday}</span>
+            </p>
+          </details>
+        </div>
 
         {/* Settings, at the foot of the page on a phone and of the left rail on
             desktop. The language control came back here rather than to its old
@@ -871,8 +1078,12 @@ const CalendarBuilder = () => {
 
           {/* Scrolls rather than wraps: a fixed single row keeps the block's
               height constant as the year changes, and a leap-year type returns
-              far fewer neighbours than a common-year one. */}
-          <div className="mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none">
+              far fewer neighbours than a common-year one.
+
+              On paper it wraps instead. A scroll container prints only what fits
+              the first screenful, which clipped the list at the current year —
+              losing precisely the years the printed sheet exists to advertise. */}
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none print:flex-wrap print:overflow-visible">
             {sameGrid.map(y => {
               const isCurrent = y === year;
               return (

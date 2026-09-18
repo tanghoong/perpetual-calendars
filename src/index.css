@@ -87,3 +87,60 @@ body {
   /* iOS never shows the blue tap flash on its own controls. */
   -webkit-tap-highlight-color: transparent;
 }
+
+/* The whole premise of this layout is that a year fits on one page, so not
+   being printable was the sharpest thing missing from it. With the same-grid
+   strip at the foot, a printed sheet now also states the other years it is
+   valid for, which is what makes it worth pinning up rather than reprinting.
+
+   Everything interactive is already marked `print:hidden` in the markup; this
+   handles what markup cannot. */
+@media print {
+  /* The palette is redefined rather than merely overridden, because a reader in
+     dark appearance would otherwise print white text on a background the
+     printer drops — an empty page. Declared after the dark-mode block, at equal
+     specificity, so source order settles it. */
+  :root {
+    color-scheme: light;
+    --color-ios-bg: #ffffff;
+    --color-ios-card: #ffffff;
+    --color-ios-blue: #0058b8;
+    --color-ios-blue-soft: rgb(0 88 184 / 0.1);
+    --color-ios-blue-mid: rgb(0 88 184 / 0.24);
+    --color-ios-red: #c0271c;
+    --color-ios-label: #000000;
+    --color-ios-label-2: rgb(0 0 0 / 0.68);
+    --color-ios-label-3: rgb(0 0 0 / 0.42);
+    --color-ios-fill: rgb(0 0 0 / 0.07);
+  }
+
+  @page {
+    margin: 12mm;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  /* The fills are not decoration here: which cells are lit *is* the answer, and
+     browsers drop background graphics by default. */
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* The phone layout is what prints: paper is ~794px wide at 96dpi, below the
+     `lg` breakpoint.
+
+     Its 32rem cap is deliberately left alone. Widening the sheet to fill the
+     page looks like the obvious win and is not: every cell is a fixed-height
+     row holding an `aspect-square` disc that takes its size from the *column*,
+     so past about 36px of column width the disc outgrows its row and the month
+     chips overlap each other. 32rem is the width at which the two agree. Only
+     the screen-edge padding goes. */
+  body .mx-auto {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+}
