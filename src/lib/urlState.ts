@@ -62,7 +62,15 @@ export const readViewState = (
     keeps a clean URL. */
 export const toSearchParams = (state: ViewState, currentYear: number): string => {
   const params = new URLSearchParams();
-  if (state.year !== currentYear) params.set('y', String(state.year));
+
+  // A selected view always names its year, even when that year is the current
+  // one. Omitting it kept a bare visit tidy, which was the whole intent — but
+  // "current year" is resolved from the *reader's* clock, so a link shared in
+  // December and opened in January silently answers about the wrong year, and
+  // every weekday in it is wrong. The tidiness only ever mattered for a link
+  // that selects nothing, and that case still gets it.
+  const selects = state.month !== null || state.date !== null || state.weekday !== null;
+  if (selects || state.year !== currentYear) params.set('y', String(state.year));
   if (state.language !== 'en') params.set('lang', state.language);
   if (state.month !== null) params.set('m', String(state.month));
   if (state.date !== null) params.set('d', String(state.date));

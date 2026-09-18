@@ -201,6 +201,8 @@ Verified against a clean `npm ci`, with the app driven in a real browser.
 
 `sw.js` is generated at build time from the real bundle by a plugin in `vite.config.ts`, rather than by pulling in `vite-plugin-pwa` and Workbox to solve problems this app does not have: there is no API, no runtime data and no route it does not already ship, so the whole strategy is precache-on-install, serve-from-cache, drop-the-old-cache-on-activate. Navigations are answered from the one cached shell, which is what makes a shared `?y=&m=&d=` link open offline too.
 
+The cache name is a hash of the **bytes actually served**, not of the file list. Hashing the list looked equivalent, because the JS and CSS filenames are content-addressed — but `index.html` and everything in `public/` keep stable names, so editing a meta tag or an icon produced an identical cache name and pinned returning visitors to the old copy permanently, since `activate` only drops caches whose name differs. The required entries install atomically, so a half-finished install cannot replace a working offline copy with an empty one. And only this app's own caches are dropped on activate: on a `<user>.github.io` origin, every other project that account publishes is a same-origin neighbour sharing one CacheStorage.
+
 Verified by driving a real browser: 11 entries cached, then the network cut **and** the HTTP cache disabled, and a deep link still rendered the full grid.
 
 ### Open

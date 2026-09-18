@@ -250,6 +250,29 @@ const CalendarBuilder = () => {
   const clampYear = (y: number) => Math.min(MAX_YEAR, Math.max(MIN_YEAR, y));
 
   /**
+   * Moves to a year, dropping a pinned date the new year cannot hold.
+   *
+   * Only 29 February is ever affected, and only when leaving a leap year, but
+   * leaving it pinned broke three things at once: `<input type="date">` was fed
+   * "2025-02-29" and went blank, the URL carried a `d` that `readViewState`
+   * discarded on reload, and the crosshair still resolved a row — so clicking
+   * that cell cleared the selection instead of making one. The grid itself was
+   * always honest about it, which is exactly why nothing caught it.
+   *
+   * Every path that changes the year goes through here, so the pin can never
+   * outlive the year that made it possible.
+   */
+  const applyYear = (next: number) => {
+    const target = clampYear(next);
+    setYear(target);
+    setPinned(p =>
+      p.month !== null && p.date !== null && p.date > daysInMonth(target, p.month)
+        ? withAxis({ ...p, order: p.order.filter(a => a !== 'date') }, 'date', null)
+        : p,
+    );
+  };
+
+  /**
    * All fourteen types, each with its silhouette and the nearest year that
    * renders it.
    *
@@ -416,7 +439,7 @@ const CalendarBuilder = () => {
 
   /** The one shortcut that is a tool rather than a demonstration. */
   const goToToday = () => {
-    setYear(currentYear);
+    applyYear(currentYear);
     setPinned({ month: currentMonth, date: currentDate, weekday: null, order: ['month', 'date'] });
   };
 
@@ -505,7 +528,7 @@ const CalendarBuilder = () => {
     // you push the next one into view.
     const next = clampYear(d.year - Math.trunc(dx / STEP_PX));
     if (next !== year) {
-      setYear(next);
+      applyYear(next);
       dragChangedYear.current = true;
     }
   };
@@ -594,7 +617,7 @@ const CalendarBuilder = () => {
     }
     const [y, m, d] = value.split('-').map(Number);
     if (!Number.isInteger(y) || y < MIN_YEAR || y > MAX_YEAR) return;
-    setYear(y);
+    applyYear(y);
     setPinned({ month: m - 1, date: d, weekday: null, order: ['month', 'date'] });
   };
 
@@ -734,7 +757,7 @@ const CalendarBuilder = () => {
           <div className="flex shrink-0 items-center rounded-full bg-ios-fill p-1 text-[17px] print:hidden">
             <button
               type="button"
-              onClick={() => setYear(y => Math.max(MIN_YEAR, y - 1))}
+              onClick={() => applyYear(year - 1)}
               disabled={year <= MIN_YEAR}
               aria-label={t.prevYear}
               className={`${PRESSABLE} ${FOCUS_RING} grid h-8 w-8 place-items-center rounded-full text-ios-blue disabled:opacity-30`}
@@ -743,7 +766,7 @@ const CalendarBuilder = () => {
             </button>
             <select
               value={year}
-              onChange={e => setYear(Number(e.target.value))}
+              onChange={e => applyYear(Number(e.target.value))}
               aria-label={t.yearLabel}
               className={`${PRESSABLE} ${FOCUS_RING} cursor-pointer appearance-none rounded-full bg-transparent px-1 text-center font-semibold tabular-nums ${
                 showToday ? 'text-ios-blue' : 'text-ios-label'
@@ -757,7 +780,7 @@ const CalendarBuilder = () => {
             </select>
             <button
               type="button"
-              onClick={() => setYear(y => Math.min(MAX_YEAR, y + 1))}
+              onClick={() => applyYear(year + 1)}
               disabled={year >= MAX_YEAR}
               aria-label={t.nextYear}
               className={`${PRESSABLE} ${FOCUS_RING} grid h-8 w-8 place-items-center rounded-full text-ios-blue disabled:opacity-30`}
@@ -1124,7 +1147,12 @@ const CalendarBuilder = () => {
                           type="button"
                           role="gridcell"
                           aria-colindex={col + 1}
-                          aria-pressed={atIntersection}
+                          // aria-selected, not aria-pressed. role="gridcell"
+                          // replaces the button role, and a gridcell does not
+                          // support aria-pressed — so the state was being
+                          // dropped by assistive tech rather than announced,
+                          // which the grid semantics themselves introduced.
+                          aria-selected={atIntersection}
                           // One tab stop for the whole block; the arrows do the
                           // rest. Without this the grid alone was 49 of the
                           // page's 99 tab stops.
@@ -1365,7 +1393,7 @@ const CalendarBuilder = () => {
                 <button
                   key={y}
                   type="button"
-                  onClick={() => setYear(y)}
+                  onClick={() => applyYear(y)}
                   aria-current={isCurrent ? 'true' : undefined}
                   className={`${PRESSABLE} ${FOCUS_RING} shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold tabular-nums ${
                     isCurrent ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-blue'
@@ -1420,7 +1448,7 @@ const CalendarBuilder = () => {
                     <button
                       type="button"
                       disabled={nearest === null}
-                      onClick={() => nearest !== null && setYear(nearest)}
+                      onClick={() => nearest !== null && applyYear(nearest)}
                       aria-current={isCurrent ? 'true' : undefined}
                       aria-label={`${phrase} — ${nearest ?? ''}`}
                       className={`${PRESSABLE} ${FOCUS_RING} flex w-full flex-col items-center gap-1 rounded-xl px-1.5 py-2 ${
