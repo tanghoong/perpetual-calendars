@@ -1,19 +1,39 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowCounterclockwise, ChevronLeft, ChevronRight, XMark } from './icons';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowCounterclockwise,
+  Checkmark,
+  ChevronLeft,
+  ChevronRight,
+  Printer,
+  ShareUp,
+  XMark,
+} from './icons';
+import {
+  CALENDAR_TYPE_COUNT,
+  calendarTypeOf,
   columnForMonth,
   dateAt,
+  DATE_COLS,
   datesInRow,
   daysInMonth,
+  dominicalLetterOf,
+  FIRST_GREGORIAN_YEAR,
   isBeforeToday,
+  isLeapType,
+  LAST_SUPPORTED_YEAR,
   MONTHS_WITH_31_DAYS,
   monthColumnsFor,
+  monthColumnsForType,
+  nearestYearOfType,
   resolveCrosshair,
   rowForDate,
+  sameGridYears,
+  startWeekdayOfType,
   weekdayAt,
+  weekdayOf,
 } from '../lib/calendar';
 import { formatDate, formatList } from '../lib/format';
-import { LOCALES, translations } from '../lib/i18n';
+import { fill, LANGUAGES, LOCALES, translations, type Language } from '../lib/i18n';
 import { readViewState, syncUrl } from '../lib/urlState';
 
 /**
@@ -57,30 +77,74 @@ const withAxis = (s: Pinned, axis: Axis, value: number | null): Pinned =>
       ? { ...s, date: value }
       : { ...s, weekday: value };
 
-// Every cell is a fixed-height row box holding a square disc. The split matters:
+// Every cell is a fixed-height row box holding the painted tile. The split
+// matters:
 //
 //   CELL fixes the row height, which is what keeps the 5-column date block and
 //   the 7-column weekday block on the same baseline — their column widths differ
 //   by a hair because they divide their gaps differently, so anything that let
 //   height follow width would drift the two blocks apart down the grid.
 //
-//   DISC takes its width from the column and its height from `aspect-square`, so
-//   the filled shape is a true circle at every viewport rather than the oval a
-//   `rounded-full` box wider or taller than itself produces. Column width is
-//   always the smaller of the two dimensions here (max ~32px against a 36px row),
-//   so the disc can never outgrow its row.
+//   TILE is the painted shape, and it fills the cell exactly: full width, full
+//   height, square corners. It used to be a circle sized off `aspect-square`,
+//   which had two problems. The cosmetic one: circles can only meet at a point,
+//   so a lit row read as a row of separate dots rather than as a row. The
+//   structural one: taking height from *column* width meant the shape outgrew
+//   its fixed row wherever a column got wide, which is what happens on the
+//   desktop layout — and the month chips overlapped each other.
 //
-// Splitting them also keeps the tap target at the full row height while the
-// visible circle stays honest — on a phone the target is 32px tall where the
-// circle is only ~23px across.
+//   Filling the cell fixes both, and the grids then drop their gaps entirely so
+//   the tiles abut. That is what makes the crosshair read as one continuous band
+//   through the grid rather than a dotted line of hints — which is what the
+//   layout actually means. Rounding belongs to the controls around the grid;
+//   inside it, square corners are what let the band close up. Nothing is lost by
+//   removing the gaps, because an unlit tile paints nothing: the separation that
+//   used to come from gaps now comes from there being no fill to separate.
 //
-// The mobile values are the binding constraint, not the desktop ones: at 320px
-// each of the seven weekday columns gets ~21px, which 10px tracking-tight text
-// fits and 11px does not. Everything scales up from there.
-const CELL = 'flex h-8 w-full items-center justify-center sm:h-9';
-const DISC = 'flex aspect-square w-full items-center justify-center rounded-full transition-colors';
-const DATE_TEXT = 'text-[11px] sm:text-[13px]';
-const LABEL_TEXT = 'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal';
+// Splitting CELL from TILE still keeps the tap target at the full row height.
+//
+// The row height steps with the breakpoint so the cell stays near-square at each
+// one — the grid's width comes from its container, and only the height is ours
+// to pick. At 320px each of the seven weekday columns gets ~21px against a 32px
+// row, and 10px tracking-tight text fits where 11px does not; at `sm` the 32rem
+// cap puts the column at ~36px against a 36px row; on the desktop layout the
+// card is wider, so the row grows to 48 to meet it.
+const CELL = 'flex h-8 w-full items-center justify-center sm:h-9 lg:h-12';
+const TILE = 'flex h-full w-full items-center justify-center transition-colors';
+const DATE_TEXT = 'text-[11px] sm:text-[13px] lg:text-[15px]';
+const LABEL_TEXT =
+  'text-[10px] tracking-tight sm:text-[12px] sm:tracking-normal lg:text-[14px]';
+
+/**
+ * Rounding for a tile sitting at the outer edge of a highlight band.
+ *
+ * The crosshair is a plus sign built out of abutting squares, and a plus sign
+ * cut off square at all four tips looks like it was clipped rather than drawn.
+ * Only the *outer* corners round: a corner is outer when both edges meeting
+ * there have nothing lit beyond them, which is what keeps the band's inner
+ * angles sharp and lets it close up where the arms cross.
+ *
+ * Callers pass which edges are exposed rather than their coordinates, because
+ * each of the three blocks decides that differently — the month column's band
+ * continues downward into the weekday grid, the date row's does not continue
+ * anywhere, and the weekday grid has both arms running through it.
+ */
+const bandCorners = (top: boolean, right: boolean, bottom: boolean, left: boolean): string =>
+  [
+    top && left ? 'rounded-tl-lg' : '',
+    top && right ? 'rounded-tr-lg' : '',
+    bottom && right ? 'rounded-br-lg' : '',
+    bottom && left ? 'rounded-bl-lg' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+// Every group of controls says what it is. They were previously distinguishable
+// only by shape, which left a reader looking at three unlabelled rows of pills
+// above and below the grid with no way to tell a filter from a shortcut — the
+// names existed, but only as aria-labels, so only a screen reader got them.
+const SECTION_LABEL =
+  'px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-ios-label-3';
 
 // iOS control surface: dims on press rather than flashing a highlight.
 const PRESSABLE = 'select-none transition active:opacity-55';
@@ -89,14 +153,29 @@ const FOCUS_RING =
 const CELL_FOCUS =
   'group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-ios-blue';
 
-// The jump range offered by the year picker. The steppers clamp to the same
-// bounds, so `year` can never sit outside the option list and leave the select
-// rendering blank.
-const THIS_YEAR = new Date().getFullYear();
-const MIN_YEAR = THIS_YEAR - 60;
-const MAX_YEAR = THIS_YEAR + 60;
+// The year range, which is now the calendar's real range rather than a window
+// around today. A perpetual calendar has no sliding bound; what it does have is
+// a first year it can honestly claim to be right about, and that is the year the
+// Gregorian calendar was fully in effect.
+const MIN_YEAR = FIRST_GREGORIAN_YEAR;
+const MAX_YEAR = LAST_SUPPORTED_YEAR;
 const YEAR_BOUNDS = { min: MIN_YEAR, max: MAX_YEAR };
-const YEARS = Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
+
+// The picker cannot list 8,417 years, so it lists a window — centred on the
+// current year rather than on today, which is what lets the steppers run to the
+// bounds without the value ever falling outside its own option list.
+const PICKER_SPAN = 60;
+
+// Rows in a type's month silhouette. Three for every one of the fourteen, never
+// two and never four — twelve months over seven columns forces at least one
+// column to hold three, and no arrangement pushes a fourth into any of them.
+// Locked by a test, because the thumbnails hard-code it to keep a uniform height.
+const MONTH_ROWS = 3;
+
+// How many same-grid years to offer either side. Five is enough to cross a
+// century boundary for a common-year type, where they recur every 6 or 11 years,
+// without making the strip unreadable for a leap-year type, where they do not.
+const SAME_GRID_NEIGHBOURS = 5;
 
 const CalendarBuilder = () => {
   // One Date for the life of the component: it feeds memo dependencies, and a
@@ -111,9 +190,9 @@ const CalendarBuilder = () => {
     readViewState(window.location.search, currentYear, YEAR_BOUNDS),
   );
   const [year, setYear] = useState(initial.year);
-  // Read from ?lang= once and then held constant: the switcher is gone from the
-  // UI, so nothing can change it during a session.
-  const language = initial.language;
+  // Seeded from ?lang= and then owned by the switcher. It stays in the URL, so
+  // a language choice survives a reload and travels with a shared link.
+  const [language, setLanguage] = useState<Language>(initial.language);
   const [pinned, setPinned] = useState<Pinned>(() => ({
     month: initial.month,
     date: initial.date,
@@ -121,6 +200,14 @@ const CalendarBuilder = () => {
     order: (['month', 'date', 'weekday'] as Axis[]).filter(a => initial[a] !== null),
   }));
   const [hovered, setHovered] = useState<Selection>(EMPTY);
+
+  // The explainer starts open for a reader arriving cold, and closed for one
+  // arriving on a shared link — that link came with context, and its sender
+  // did not mean to send a tutorial. Derived once from the URL rather than
+  // stored, so there is still nothing persisted anywhere.
+  const [explainerOpen, setExplainerOpen] = useState(
+    () => initial.month === null && initial.date === null && initial.weekday === null,
+  );
 
   const t = translations[language];
 
@@ -139,6 +226,82 @@ const CalendarBuilder = () => {
 
   const monthColumns = useMemo(() => monthColumnsFor(year), [year]);
   const monthRowCount = Math.max(...monthColumns.map(col => col.length));
+
+  // The fourth axis. A year contributes exactly one thing to this layout — the
+  // arrangement of the twelve month chips — and there are only fourteen of those,
+  // so every year is one of fourteen. The strip below names the neighbours that
+  // share this one, which is the whole perpetual claim in a single row.
+  const calendarType = calendarTypeOf(year);
+  const typePhrase = fill(
+    isLeapType(calendarType) ? t.leapYearStarting : t.commonYearStarting,
+    t.weekdaysLong[startWeekdayOfType(calendarType)],
+  );
+  const sameGrid = useMemo(
+    () =>
+      sameGridYears(year, {
+        before: SAME_GRID_NEIGHBOURS,
+        after: SAME_GRID_NEIGHBOURS,
+        min: MIN_YEAR,
+        max: MAX_YEAR,
+      }),
+    [year],
+  );
+
+  const clampYear = (y: number) => Math.min(MAX_YEAR, Math.max(MIN_YEAR, y));
+
+  /**
+   * Moves to a year, dropping a pinned date the new year cannot hold.
+   *
+   * Only 29 February is ever affected, and only when leaving a leap year, but
+   * leaving it pinned broke three things at once: `<input type="date">` was fed
+   * "2025-02-29" and went blank, the URL carried a `d` that `readViewState`
+   * discarded on reload, and the crosshair still resolved a row — so clicking
+   * that cell cleared the selection instead of making one. The grid itself was
+   * always honest about it, which is exactly why nothing caught it.
+   *
+   * Every path that changes the year goes through here, so the pin can never
+   * outlive the year that made it possible.
+   */
+  const applyYear = (next: number) => {
+    const target = clampYear(next);
+    setYear(target);
+    setPinned(p =>
+      p.month !== null && p.date !== null && p.date > daysInMonth(target, p.month)
+        ? withAxis({ ...p, order: p.order.filter(a => a !== 'date') }, 'date', null)
+        : p,
+    );
+  };
+
+  /**
+   * All fourteen types, each with its silhouette and the nearest year that
+   * renders it.
+   *
+   * Depends on `year` only through `nearestYearOfType`, so the shapes and the
+   * letters are computed once per year change rather than per render — and they
+   * would be constant if the picker did not need a year to jump to.
+   */
+  const allTypes = useMemo(
+    () =>
+      Array.from({ length: CALENDAR_TYPE_COUNT }, (_, type) => ({
+        type,
+        shape: monthColumnsForType(type),
+        letter: dominicalLetterOf(type),
+        phrase: fill(
+          isLeapType(type) ? t.leapYearStarting : t.commonYearStarting,
+          t.weekdaysLong[startWeekdayOfType(type)],
+        ),
+        nearest: nearestYearOfType(type, year, MIN_YEAR, MAX_YEAR),
+      })),
+    [year, t],
+  );
+
+  // Centred on `year`, so stepping or jumping can never leave the value outside
+  // its own option list — which would render the select blank.
+  const yearOptions = useMemo(() => {
+    const from = Math.max(MIN_YEAR, year - PICKER_SPAN);
+    const to = Math.min(MAX_YEAR, year + PICKER_SPAN);
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  }, [year]);
 
   // Each axis resolves independently, and a pin beats a hover on its own axis.
   // That is what makes "pin the month, then sweep the dates" work: the pinned
@@ -230,29 +393,72 @@ const CalendarBuilder = () => {
     setHovered(EMPTY);
   };
 
+  // The document language drives screen-reader pronunciation and the browser's
+  // own offer to translate. It was pinned to "en" in index.html while the page
+  // could already render Chinese, Malay or Vietnamese from ?lang=.
+  useEffect(() => {
+    document.documentElement.lang = LOCALES[language];
+  }, [language]);
+
   /**
-   * Shortcuts: the questions worth one tap.
+   * Shares the current view.
    *
-   * Deliberately culture-neutral — a hardcoded Christmas would be noise for
-   * three of the four languages this ships in. "Friday the 13th" earns its
-   * place by being the reverse lookup in its purest form: a date and a weekday,
-   * answered by a set of months, which is the query a conventional calendar is
-   * worst at.
+   * `urlState` has been mirroring the whole selection into the address bar all
+   * along, but nothing in the UI said so, which made a shareable view a feature
+   * only its author knew about. The native sheet is the right affordance where
+   * it exists — on iOS it is how anything gets shared — and a clipboard copy is
+   * the fallback everywhere else.
    */
-  const presets: { key: string; label: string; apply: () => void }[] = [
-    {
-      key: 'today',
-      label: t.todayLabel,
-      apply: () => {
-        setYear(currentYear);
-        setPinned({
-          month: currentMonth,
-          date: currentDate,
-          weekday: null,
-          order: ['month', 'date'],
-        });
-      },
-    },
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+
+  const share = async () => {
+    const url = window.location.href;
+    if (typeof navigator.share === 'function') {
+      // A dismissed share sheet rejects. That is the user declining, not a
+      // failure, so it must not fall through to a surprise clipboard write.
+      try {
+        await navigator.share({ title: t.title, text: headline, url });
+      } catch {
+        /* dismissed */
+      }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      // Clipboard access is permission-gated and absent over plain HTTP. There
+      // is nothing useful to say: the address bar already holds the same link.
+    }
+  };
+
+  /** The one shortcut that is a tool rather than a demonstration. */
+  const goToToday = () => {
+    applyYear(currentYear);
+    setPinned({ month: currentMonth, date: currentDate, weekday: null, order: ['month', 'date'] });
+  };
+
+  /**
+   * Two lookups worth trying, which live in the explainer rather than beside
+   * Today.
+   *
+   * They were shortcuts on the main surface, and they were miscast: nobody
+   * arrives needing to know about Friday the 13th. They are *demonstrations* —
+   * "Friday 13" is the reverse lookup in its purest form, a date and a weekday
+   * answered by a set of months, which is the query a conventional calendar is
+   * worst at, and 1 January is the plain forward lookup. Sitting inside "How to
+   * read it", each one is an example the reader can run, which is what they were
+   * always for, and the main surface is two buttons lighter.
+   *
+   * Deliberately culture-neutral: a hardcoded Christmas would be noise for three
+   * of the four languages this ships in.
+   */
+  const examples: { key: string; label: string; apply: () => void }[] = [
     {
       key: 'friday13',
       label: `${t.weekdaysLong[5]} 13`,
@@ -267,12 +473,177 @@ const CalendarBuilder = () => {
     },
   ];
 
+  /**
+   * Drag the grid sideways to change the year.
+   *
+   * This is the whole instrument in one gesture. A physical perpetual calendar
+   * is a card with exactly one moving part: you slide it, and the thing re-reads.
+   * That is also literally what happens here — the twelve month chips are the
+   * only elements that move when the year changes, and the seven-by-seven block
+   * beneath them never moves at all, because it cannot. So the grid *is* the
+   * slider, and until now the only way to push it was a stepper parked at the
+   * top of the page.
+   *
+   * Dragging teaches the perpetual claim by feel: the months flow, everything
+   * else stays put. The year steps per `STEP_PX` of travel rather than on
+   * release, so a long drag crosses several years and the reader watches the
+   * months re-flow through each one.
+   */
+  const drag = useRef<{ x: number; y: number; year: number; axis: 'none' | 'x' | 'y' } | null>(null);
+  // A drag ends with a pointerup over some cell, and the browser turns that into
+  // a click — so without this the gesture would also select whatever the finger
+  // happened to land on. Set when a drag actually moves the year; consumed by
+  // the capture-phase handler before the cell ever sees the event.
+  const dragChangedYear = useRef(false);
+  const STEP_PX = 56;
+
+  const onDragStart = (e: React.PointerEvent) => {
+    // Cleared here, not after the click it suppresses. A drag does not reliably
+    // produce a trailing click — end it on an element that does not take one and
+    // none arrives — and a flag left standing would then eat the *next* genuine
+    // tap instead. Tying it to the start of a gesture means it can only ever
+    // suppress a click belonging to the gesture that set it.
+    dragChangedYear.current = false;
+    // Mouse drags would fight text selection and click-to-select for no gain —
+    // a mouse already has the stepper, the picker and the year chips.
+    if (e.pointerType === 'mouse') return;
+    drag.current = { x: e.clientX, y: e.clientY, year, axis: 'none' };
+  };
+
+  const onDragMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (d === null) return;
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    // Decide once which way this gesture is going. Without a lock, a mostly
+    // vertical scroll that wobbles sideways would step the year underneath the
+    // reader's thumb.
+    if (d.axis === 'none') {
+      if (Math.abs(dx) < 12 && Math.abs(dy) < 12) return;
+      d.axis = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'x' : 'y';
+      if (d.axis === 'y') drag.current = null;
+      return;
+    }
+    // Dragging left moves forward, the direction a sheet of paper travels when
+    // you push the next one into view.
+    const next = clampYear(d.year - Math.trunc(dx / STEP_PX));
+    if (next !== year) {
+      applyYear(next);
+      dragChangedYear.current = true;
+    }
+  };
+
+  const onDragEnd = () => {
+    drag.current = null;
+  };
+
+  const swallowClickAfterDrag = (e: React.MouseEvent) => {
+    if (!dragChangedYear.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   // Mouse only. Touch browsers synthesize a hover that persists after the tap,
   // which would outlive an unpin and leave the crosshair lit with nothing
   // selected.
   const hoverIfMouse = (e: { pointerType: string }, selection: Selection) => {
     if (e.pointerType === 'mouse') setHovered(s => ({ ...s, ...selection }));
   };
+
+  /**
+   * Roving tabindex over the 7x7 weekday block.
+   *
+   * Every cell was a tab stop, which put 49 of them in this block alone and 99
+   * across the page — so reaching the grid's far corner by keyboard took more
+   * presses than reading the answer off a wall calendar would have. The ARIA
+   * grid pattern is one tab stop for the whole block, with the arrows moving
+   * inside it.
+   *
+   * Movement wraps, which is not the usual choice but is the right one here:
+   * this block *is* a cyclic group. Row r is the week rotated left by r and
+   * column c likewise, so stepping off the last column onto the first is the
+   * same relationship every other step expresses, not an edge case.
+   */
+  const [roving, setRoving] = useState({ row: 0, col: 0 });
+  const cellRefs = useRef(new Map<string, HTMLButtonElement | null>());
+
+  const moveRoving = (row: number, col: number) => {
+    setRoving({ row, col });
+    cellRefs.current.get(`${row}-${col}`)?.focus();
+  };
+
+  const STEPS: Record<string, [number, number]> = {
+    ArrowUp: [-1, 0],
+    ArrowDown: [1, 0],
+    ArrowLeft: [0, -1],
+    ArrowRight: [0, 1],
+  };
+
+  const onGridKeyDown = (e: React.KeyboardEvent, row: number, col: number) => {
+    const step = STEPS[e.key];
+    if (step) {
+      e.preventDefault();
+      moveRoving((row + step[0] + 7) % 7, (col + step[1] + 7) % 7);
+      return;
+    }
+    if (e.key === 'Home') {
+      e.preventDefault();
+      moveRoving(e.ctrlKey ? 0 : row, 0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      moveRoving(e.ctrlKey ? 6 : row, 6);
+    }
+  };
+
+  // The tab stop follows the selection where there is one, so tabbing back into
+  // the grid returns to the cell the reader was last working with rather than
+  // to the corner.
+  const rovingRow = pinnedCross.row ?? roving.row;
+  const rovingCol = pinnedCross.col ?? roving.col;
+
+  /**
+   * Jumps to a whole date at once, from the platform's own date picker.
+   *
+   * A native `<input type="date">` rather than parsed text: it brings the iOS
+   * wheel and the Android calendar for free, validates itself, and renders in
+   * the reader's own locale order — none of which four hand-written parsers
+   * would have got right.
+   */
+  const goToDate = (value: string) => {
+    // Empty is the clear button inside the native control.
+    if (value === '') {
+      clear();
+      return;
+    }
+    const [y, m, d] = value.split('-').map(Number);
+    if (!Number.isInteger(y) || y < MIN_YEAR || y > MAX_YEAR) return;
+    applyYear(y);
+    setPinned({ month: m - 1, date: d, weekday: null, order: ['month', 'date'] });
+  };
+
+  /**
+   * The explainer's worked example, computed rather than written.
+   *
+   * Christmas is the date the README has always used, but the point here is
+   * only that it is a fixed date whose weekday moves with the year — so the
+   * illustration stays true when the reader steps the year, which a hardcoded
+   * "Dec 25 is a Friday" would not.
+   */
+  const example = {
+    // LOCALES[language] rather than the `locale` binding below: this runs at its
+    // own declaration, which is above that one.
+    date: formatDate(LOCALES[language], 'dayMonthShort', new Date(year, 11, 25)),
+    weekday: t.weekdaysLong[weekdayOf(year, 11, 25)],
+  };
+
+  // The control shows a date only when one is actually pinned; a hover must not
+  // rewrite the input under the reader's cursor.
+  const dateInputValue =
+    pinned.month !== null && pinned.date !== null
+      ? `${String(year).padStart(4, '0')}-${String(pinned.month + 1).padStart(2, '0')}-${String(
+          pinned.date,
+        ).padStart(2, '0')}`
+      : '';
 
 
   // The heading is the lookup, and which of the three questions it answers
@@ -336,7 +707,7 @@ const CalendarBuilder = () => {
           grid areas rather than duplicated markup, so the DOM order — and with
           it the tab order and the screen-reader order — stays the reading
           order at every width. */}
-      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_1fr] lg:items-start lg:gap-x-8 lg:gap-y-4">
+      <div className="mx-auto w-full max-w-lg px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] sm:px-5 lg:grid lg:max-w-4xl lg:grid-cols-[15rem_1fr] lg:grid-rows-[auto_auto_auto_auto_auto_1fr_auto] lg:items-start lg:gap-x-8 lg:gap-y-4">
         {/* aria-live announces the resolved date as focus moves through the
             grid, which is what turns the crosshair into something a screen
             reader can follow. min-h reserves two lines so stepping between
@@ -354,7 +725,7 @@ const CalendarBuilder = () => {
             57px at `lg`. Each holds a few pixels of slack over that. */}
         <div
           aria-live="polite"
-          className="flex min-h-12 flex-col justify-start sm:min-h-[4.5rem] lg:col-span-2 lg:min-h-16"
+          className="flex min-h-12 flex-col justify-start sm:min-h-18 lg:col-span-2 lg:min-h-16"
         >
           <h1 className="text-[18px] font-bold leading-tight tracking-[-0.015em] tabular-nums sm:text-[26px]">
             {headline}
@@ -368,15 +739,25 @@ const CalendarBuilder = () => {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 lg:col-start-1 lg:row-start-2 lg:mt-0">
+          {/* On paper the year has to be stated, not sat inside a <select> the
+              printer renders as an empty box. This is also the only place the
+              sheet says what it is: a year, its type, and — from the strip at
+              the foot — the other years it is equally valid for. */}
+          <p className="hidden text-[20px] font-bold tabular-nums print:block">
+            {year}{' '}
+            <span className="text-[14px] font-medium">
+              · {typePhrase} ({dominicalLetterOf(calendarType)})
+            </span>
+          </p>
           {/* Year stepper, shaped like an iOS stepper: one filled pill track
               carrying two round glyph buttons with the value between them. The
               value is itself a <select> — a native picker is the fast path off
               the current year, and on iOS it opens the system wheel, so a jump
               of forty years is one gesture instead of forty taps. */}
-          <div className="flex shrink-0 items-center rounded-full bg-ios-fill p-1 text-[17px]">
+          <div className="flex shrink-0 items-center rounded-full bg-ios-fill p-1 text-[17px] print:hidden">
             <button
               type="button"
-              onClick={() => setYear(y => Math.max(MIN_YEAR, y - 1))}
+              onClick={() => applyYear(year - 1)}
               disabled={year <= MIN_YEAR}
               aria-label={t.prevYear}
               className={`${PRESSABLE} ${FOCUS_RING} grid h-8 w-8 place-items-center rounded-full text-ios-blue disabled:opacity-30`}
@@ -385,13 +766,13 @@ const CalendarBuilder = () => {
             </button>
             <select
               value={year}
-              onChange={e => setYear(Number(e.target.value))}
+              onChange={e => applyYear(Number(e.target.value))}
               aria-label={t.yearLabel}
               className={`${PRESSABLE} ${FOCUS_RING} cursor-pointer appearance-none rounded-full bg-transparent px-1 text-center font-semibold tabular-nums ${
                 showToday ? 'text-ios-blue' : 'text-ios-label'
               }`}
             >
-              {YEARS.map(y => (
+              {yearOptions.map(y => (
                 <option key={y} value={y}>
                   {y}
                 </option>
@@ -399,7 +780,7 @@ const CalendarBuilder = () => {
             </select>
             <button
               type="button"
-              onClick={() => setYear(y => Math.min(MAX_YEAR, y + 1))}
+              onClick={() => applyYear(year + 1)}
               disabled={year >= MAX_YEAR}
               aria-label={t.nextYear}
               className={`${PRESSABLE} ${FOCUS_RING} grid h-8 w-8 place-items-center rounded-full text-ios-blue disabled:opacity-30`}
@@ -408,20 +789,18 @@ const CalendarBuilder = () => {
             </button>
           </div>
 
-          {/* The header's right half carries both transient actions, which is
-              also where iOS puts a navigation bar's trailing controls. Clear is
-              icon-only so the two fit at 320px in the longest language. */}
-          <div className="flex min-w-0 items-center gap-2">
-            {!showToday && (
-              <button
-                type="button"
-                onClick={() => setYear(currentYear)}
-                className={`${PRESSABLE} ${FOCUS_RING} flex h-9 min-w-0 items-center gap-1.5 rounded-full bg-ios-blue px-3.5 text-[13px] font-semibold text-white`}
-              >
-                <ArrowCounterclockwise className="h-[1.15em] w-[1.15em] shrink-0" />
-                <span className="truncate">{t.currentYear}</span>
-              </button>
-            )}
+          {/* The header's trailing controls, which is where iOS puts them.
+              All icon-only, so the row still fits 320px in every language.
+
+              The "Current Year" pill used to live here and is gone: the Today
+              shortcut already resets the year, and does it while also naming
+              today's date, which is what a reader reaching for it actually
+              wanted. Two controls for one action was one too many.
+
+              Print moved up from the footer to sit beside Share. They are the
+              two ways this page leaves the screen, so they belong together —
+              and it leaves the footer holding nothing but the language. */}
+          <div className="flex min-w-0 items-center gap-2 print:hidden">
             {hasPin && (
               <button
                 type="button"
@@ -432,6 +811,24 @@ const CalendarBuilder = () => {
                 <XMark />
               </button>
             )}
+            <button
+              type="button"
+              onClick={share}
+              aria-label={t.share}
+              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] ${
+                copied ? 'text-ios-blue' : 'text-ios-label-2'
+              }`}
+            >
+              {copied ? <Checkmark /> : <ShareUp />}
+            </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              aria-label={t.print}
+              className={`${PRESSABLE} ${FOCUS_RING} grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ios-fill text-[15px] text-ios-label-2`}
+            >
+              <Printer />
+            </button>
           </div>
         </div>
 
@@ -440,11 +837,13 @@ const CalendarBuilder = () => {
             can never express "I only care about Fridays" — the half of the
             lookup a conventional calendar is worst at. Sitting directly above
             the grid, it now reads as what it is: a filter on the whole board. */}
-        <div
-          role="group"
-          aria-label={t.weekdayLabel}
-          className="mt-3 grid grid-cols-7 gap-1 lg:col-start-1 lg:row-start-3 lg:mt-0 lg:grid-cols-4"
-        >
+        <div className="mt-4 print:hidden lg:col-start-1 lg:row-start-3 lg:mt-0">
+          <h2 className={SECTION_LABEL}>{t.weekdayLabel}</h2>
+          <div
+            role="group"
+            aria-label={t.weekdayLabel}
+            className="mt-1.5 grid grid-cols-7 gap-1 lg:grid-cols-4"
+          >
           {t.weekdays.map((label, weekday) => {
             const isOn = activeWeekday === weekday;
             return (
@@ -464,17 +863,26 @@ const CalendarBuilder = () => {
                       ? 'bg-ios-fill text-ios-red'
                       : 'bg-ios-fill text-ios-label-2'
                 }`}
-              >
-                {label}
-              </button>
-            );
-          })}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Grouped-content card */}
         <div
-          className="mt-4 rounded-[1.75rem] bg-ios-card p-2 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-4 lg:mt-0"
+          className="mt-4 touch-pan-y rounded-[1.75rem] bg-ios-card p-2 print:break-inside-avoid print:border print:border-black/10 sm:p-4 lg:col-start-2 lg:row-start-2 lg:row-span-5 lg:mt-0"
           onPointerLeave={() => setHovered(EMPTY)}
+          // touch-pan-y hands vertical scrolling back to the browser and keeps
+          // horizontal gestures here, which is what makes the drag possible
+          // without trapping the page.
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+          onClickCapture={swallowClickAfterDrag}
         >
           {/* Two blocks side by side, sized 5:7 to match their column counts.
               The gap is what makes the date axis read as separate from the
@@ -482,11 +890,13 @@ const CalendarBuilder = () => {
           <div className="flex gap-1.5 sm:gap-3">
             {/* Dates */}
             <div className="flex-5">
-              {/* Mirrors the month grid's shape with the same cell and gap
-                  classes, so both blocks start on the same line at every
-                  breakpoint without hard-coded offsets. The otherwise dead
-                  corner carries the axis label. */}
-              <div className="mb-px grid grid-cols-5 gap-0.5 sm:mb-1 sm:gap-1">
+              {/* Mirrors the month grid's shape with the same cell classes, so
+                  both blocks start on the same line at every breakpoint without
+                  hard-coded offsets. The otherwise dead corner carries the axis
+                  label. No bottom margin: the month column's band runs straight
+                  down into the weekday grid, and a margin there left a bright
+                  line with an unpainted gap through the middle of it. */}
+              <div className="grid grid-cols-5">
                 {Array.from({ length: (monthRowCount - 1) * 5 }, (_, i) => (
                   <div key={`pad-${i}`} className={CELL} />
                 ))}
@@ -497,11 +907,50 @@ const CalendarBuilder = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-5 gap-0.5 sm:gap-1">
+              {/* A named group rather than a second `role="grid"`. The 7x7
+                  block below is a grid because its cells are an intersection
+                  and it implements the arrow-key pattern that role obliges;
+                  these are 31 independent targets with their own meaning, and
+                  claiming grid semantics without the keyboard behaviour would
+                  be a worse lie than claiming none. */}
+              <div
+                role="group"
+                aria-label={t.dateGridLabel}
+                className="grid grid-cols-5"
+              >
                 {Array.from({ length: 7 }, (_, row) =>
                   Array.from({ length: 5 }, (_, col) => {
-                    const num = dateAt(row, col);
-                    if (num === null) return <div key={`d-${row}-${col}`} />;
+                    // Columns run *backwards*: 1-7 on the right, 29-31 on the
+                    // left. Every row is the same weekday whichever column you
+                    // read it in, so the order costs nothing — and it moves the
+                    // four cells that hold no date out of the block's inner edge,
+                    // where they sat as a notch between the dates and the weekday
+                    // grid, to its outer edge, where they read as margin.
+                    const num = dateAt(row, DATE_COLS - 1 - col);
+                    const inActiveRow = activeRow === row;
+                    // The date row's band is a bar on its own — nothing lit sits
+                    // above or below it — so both of its ends round. Only cells
+                    // actually in the band ask for corners; elsewhere the radius
+                    // would be invisible anyway, but it would round today's ring.
+                    const corners = inActiveRow
+                      ? bandCorners(true, col === DATE_COLS - 1, true, col === 0)
+                      : '';
+
+                    // Rows 4-7 run out of dates before they run out of columns.
+                    // Those cells still carry the band: it marks the row, not the
+                    // dates in it, and stopping short of the edge left the bar
+                    // looking broken off rather than finished.
+                    if (num === null) {
+                      return (
+                        <div key={`d-${row}-${col}`} className={CELL}>
+                          <span
+                            className={`${TILE} ${corners} ${
+                              inActiveRow ? 'bg-ios-blue-soft' : ''
+                            }`}
+                          />
+                        </div>
+                      );
+                    }
 
                     // Only real once a month is known — which is exactly why the
                     // month block is selectable.
@@ -512,7 +961,6 @@ const CalendarBuilder = () => {
                       num === currentDate &&
                       (activeMonth === null || activeMonth === currentMonth);
                     const isPast = isBeforeToday(year, activeMonth, num, today);
-                    const inActiveRow = activeRow === row;
                     // The mirror case: a month and a weekday resolve a row, and
                     // every date in it is an answer.
                     const answering = activeDate === null && activeRow !== null;
@@ -532,15 +980,25 @@ const CalendarBuilder = () => {
                       >
                         <span
                           aria-current={isToday ? 'date' : undefined}
-                          className={`${DISC} ${DATE_TEXT} ${CELL_FOCUS} font-medium tabular-nums ${
+                          className={`${TILE} ${DATE_TEXT} ${CELL_FOCUS} ${corners} font-medium tabular-nums ${
                             outOfRange
                               ? 'text-ios-label-3 line-through decoration-1 opacity-40'
                               : isSelected || isAnswer
                                 ? 'bg-ios-blue font-semibold text-white'
-                                : isToday && !answering
-                                  ? 'bg-ios-blue font-semibold text-white'
+                                : // Today is a ring, not a fill. It used to take
+                                  // the same solid blue the selection takes, so
+                                  // selecting the 13th put two identical blue
+                                  // squares in the block meaning two different
+                                  // things — the answer, and today. An outline
+                                  // never competes with a fill, so today stays
+                                  // findable in every state instead of having to
+                                  // stand down whenever something is selected.
+                                  isToday
+                                  ? `rounded-lg font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue ${
+                                      inActiveRow ? 'bg-ios-blue-soft' : ''
+                                    }`
                                   : inActiveRow
-                                    ? 'bg-ios-blue-mid text-ios-blue'
+                                    ? 'bg-ios-blue-soft text-ios-blue'
                                     : isPast
                                       ? 'text-ios-label-3'
                                       : 'text-ios-label-2 group-hover:bg-ios-fill'
@@ -557,15 +1015,32 @@ const CalendarBuilder = () => {
 
             {/* Months above, weekdays below — they share the 7 columns */}
             <div className="flex-7">
-              <div className="mb-px grid grid-cols-7 gap-0.5 sm:mb-1 sm:gap-1">
+              {/* No bottom margin, so a column's band runs unbroken from its
+                  topmost month straight down through the weekday grid. */}
+              <div role="group" aria-label={t.monthsLabel} className="grid grid-cols-7">
                 {Array.from({ length: monthRowCount }, (_, row) =>
                   Array.from({ length: 7 }, (_, col) => {
-                    const monthIndex = monthColumns[col][row];
-                    if (monthIndex === undefined) return <div key={`m-${row}-${col}`} />;
+                    // Columns hold one to three months and are packed to the
+                    // *bottom*, not the top. Top-packing left every short column
+                    // with empty cells immediately above the weekday grid, which
+                    // both stranded the months away from the axis they label and
+                    // put a hole in the middle of the column's band. Packed down,
+                    // the spare cells collect at the top of the block where
+                    // nothing needs to cross them.
+                    const months = monthColumns[col];
+                    const offset = monthRowCount - months.length;
+                    const monthIndex = row < offset ? undefined : months[row - offset];
+                    if (monthIndex === undefined) return <div key={`m-${row}-${col}`} className={CELL} />;
 
                     const isSelected = activeMonth === monthIndex;
                     const isCurrent = showToday && monthIndex === currentMonth;
                     const inActiveCol = activeCol === col;
+                    // The column's band starts at this column's first month and
+                    // continues down into the weekday grid, so only its top two
+                    // corners are ever outer ones.
+                    const corners = inActiveCol
+                      ? bandCorners(row === offset, true, false, true)
+                      : '';
                     // In a reverse lookup nothing was picked on this axis, so
                     // every month in the resolved column is part of the answer
                     // — and should read as one, not as faint context.
@@ -588,16 +1063,29 @@ const CalendarBuilder = () => {
                         className={`${CELL} group select-none focus:outline-none`}
                       >
                         <span
-                          className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} overflow-hidden px-px font-semibold ${
+                          className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} ${corners} overflow-hidden px-px font-semibold ${
                             // While an answer set is on screen the "current
                             // month" marker stands down: two different meanings
                             // sharing one solid fill would read as one answer
                             // set with a stray extra member.
-                            isSelected || isAnswer || (isCurrent && !answering)
+                            //
+                            // Unlit months carry no fill. They used to, which
+                            // was fine while each chip was a separate circle and
+                            // wrong the moment they became squares: twelve tinted
+                            // squares abutting each other stopped reading as
+                            // twelve chips and started reading as one blue slab,
+                            // and a highlight inside a slab says nothing. Blue
+                            // text alone still tells the month block apart from
+                            // the grey weekday block below it.
+                            isSelected || isAnswer
                               ? 'bg-ios-blue text-white'
-                              : inActiveCol
-                                ? 'bg-ios-blue-mid text-ios-blue'
-                                : 'bg-ios-blue-soft text-ios-blue'
+                              : isCurrent
+                                ? `rounded-lg outline-2 -outline-offset-2 outline-ios-blue ${
+                                    inActiveCol ? 'bg-ios-blue-soft' : ''
+                                  } text-ios-blue`
+                                : inActiveCol
+                                  ? 'bg-ios-blue-soft text-ios-blue'
+                                  : 'text-ios-blue group-hover:bg-ios-fill'
                           } ${
                             MONTHS_WITH_31_DAYS.has(monthIndex)
                               ? 'underline decoration-2 underline-offset-2'
@@ -612,53 +1100,104 @@ const CalendarBuilder = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
-                {Array.from({ length: 7 }, (_, row) =>
-                  Array.from({ length: 7 }, (_, col) => {
-                    const weekdayIndex = weekdayAt(row, col);
-                    const onCross = activeRow === row || activeCol === col;
-                    const atIntersection = activeRow === row && activeCol === col;
-                    const noSelection = activeRow === null && activeCol === null;
-                    const isTodayCell =
-                      noSelection && showToday && row === todayRow && col === todayCol;
+              {/* A real ARIA grid, not just a CSS one. The layout has always
+                  been an intersection of a date row and a month column, and a
+                  screen reader was never told so — which was the single thing
+                  it most needed to know about this design. The row wrappers use
+                  `contents`, so they add the semantics without adding a box. */}
+              <div
+                role="grid"
+                aria-label={t.weekdayGridLabel}
+                aria-rowcount={7}
+                aria-colcount={7}
+                className="grid grid-cols-7"
+              >
+                {Array.from({ length: 7 }, (_, row) => (
+                  <div key={`wr-${row}`} role="row" aria-rowindex={row + 1} className="contents">
+                    {Array.from({ length: 7 }, (_, col) => {
+                      const weekdayIndex = weekdayAt(row, col);
+                      const onCross = activeRow === row || activeCol === col;
+                      const atIntersection = activeRow === row && activeCol === col;
+                      const noSelection = activeRow === null && activeCol === null;
+                      const isTodayCell =
+                        noSelection && showToday && row === todayRow && col === todayCol;
 
-                    return (
-                      <button
-                        key={`w-${row}-${col}`}
-                        type="button"
-                        aria-pressed={atIntersection}
-                        // Name is the weekday alone. The pressed state travels on
-                        // aria-pressed, which assistive tech announces in the
-                        // user's own locale — spelling it out here would both
-                        // duplicate that and hardcode English into a localized name.
-                        aria-label={t.weekdaysLong[weekdayIndex]}
-                        onPointerEnter={e => hoverIfMouse(e, selectionForCell(row, col))}
-                        onFocus={() => setHovered(selectionForCell(row, col))}
-                        onBlur={() => setHovered(EMPTY)}
-                        onClick={() => toggleCell(row, col)}
-                        // The button keeps the full row height as its tap
-                        // target; the disc inside is what gets painted. Focus
-                        // and hover are therefore forwarded to the disc, so the
-                        // ring traces the circle rather than the taller box.
-                        className={`${CELL} group select-none focus:outline-none`}
-                      >
-                        <span
-                          className={`${DISC} ${LABEL_TEXT} ${CELL_FOCUS} font-medium ${
-                            atIntersection || isTodayCell
-                              ? 'bg-ios-blue font-semibold text-white'
-                              : onCross
-                                ? 'bg-ios-blue-soft text-ios-blue'
-                                : weekdayIndex === 0
-                                  ? 'text-ios-red group-hover:bg-ios-fill'
-                                  : 'text-ios-label-2 group-hover:bg-ios-fill'
-                          }`}
+                      // Both arms of the crosshair run through this block, so an
+                      // edge is outer only when the neighbour beyond it is unlit.
+                      // Row -1 is the month grid, which abuts this one and is lit
+                      // wherever the column is — so the band's top tip lives up
+                      // there, not here.
+                      const litAt = (r: number, c: number) =>
+                        r >= 0 && r < 7 && c >= 0 && c < 7 && (c === activeCol || r === activeRow);
+                      const corners = onCross
+                        ? bandCorners(
+                            row === 0 ? col !== activeCol : !litAt(row - 1, col),
+                            !litAt(row, col + 1),
+                            !litAt(row + 1, col),
+                            !litAt(row, col - 1),
+                          )
+                        : '';
+
+                      return (
+                        <button
+                          key={`w-${row}-${col}`}
+                          ref={el => {
+                            cellRefs.current.set(`${row}-${col}`, el);
+                          }}
+                          type="button"
+                          role="gridcell"
+                          aria-colindex={col + 1}
+                          // aria-selected, not aria-pressed. role="gridcell"
+                          // replaces the button role, and a gridcell does not
+                          // support aria-pressed — so the state was being
+                          // dropped by assistive tech rather than announced,
+                          // which the grid semantics themselves introduced.
+                          aria-selected={atIntersection}
+                          // One tab stop for the whole block; the arrows do the
+                          // rest. Without this the grid alone was 49 of the
+                          // page's 99 tab stops.
+                          tabIndex={row === rovingRow && col === rovingCol ? 0 : -1}
+                          // Name is the weekday alone. The pressed state travels on
+                          // aria-pressed, which assistive tech announces in the
+                          // user's own locale — spelling it out here would both
+                          // duplicate that and hardcode English into a localized name.
+                          // Where the cell *sits* now travels on the row and column
+                          // indices instead, which is the part that was missing.
+                          aria-label={t.weekdaysLong[weekdayIndex]}
+                          onKeyDown={e => onGridKeyDown(e, row, col)}
+                          onPointerEnter={e => hoverIfMouse(e, selectionForCell(row, col))}
+                          onFocus={() => {
+                            setRoving({ row, col });
+                            setHovered(selectionForCell(row, col));
+                          }}
+                          onBlur={() => setHovered(EMPTY)}
+                          onClick={() => toggleCell(row, col)}
+                          // The button keeps the full row height as its tap
+                          // target; the disc inside is what gets painted. Focus
+                          // and hover are therefore forwarded to the disc, so the
+                          // ring traces the circle rather than the taller box.
+                          className={`${CELL} group select-none focus:outline-none`}
                         >
-                          {t.weekdays[weekdayIndex]}
-                        </span>
-                      </button>
-                    );
-                  }),
-                )}
+                          <span
+                            className={`${TILE} ${LABEL_TEXT} ${CELL_FOCUS} ${corners} font-medium ${
+                              atIntersection
+                                ? 'bg-ios-blue font-semibold text-white'
+                                : isTodayCell
+                                  ? 'rounded-lg font-semibold text-ios-blue outline-2 -outline-offset-2 outline-ios-blue'
+                                  : onCross
+                                    ? 'bg-ios-blue-soft text-ios-blue'
+                                    : weekdayIndex === 0
+                                      ? 'text-ios-red group-hover:bg-ios-fill'
+                                      : 'text-ios-label-2 group-hover:bg-ios-fill'
+                            }`}
+                          >
+                            {t.weekdays[weekdayIndex]}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -667,26 +1206,316 @@ const CalendarBuilder = () => {
         {/* Shortcuts sit with the other controls: below the grid on a phone,
             in the left rail on desktop. Placed before the footnote in the DOM so
             the reading order matches the visual order at both widths. */}
-        <div role="group" aria-label={t.presetsLabel} className="mt-3 flex flex-wrap gap-2 px-1 lg:col-start-1 lg:row-start-4 lg:mt-0">
-          {presets.map(({ key, label, apply }) => (
+        <div className="mt-4 print:hidden lg:col-start-1 lg:row-start-4 lg:mt-0">
+          <h2 className={SECTION_LABEL}>{t.presetsLabel}</h2>
+          <div
+            role="group"
+            aria-label={t.presetsLabel}
+            className="mt-1.5 flex flex-wrap gap-2 px-1"
+          >
+          {/* The fast path in, for a reader who already knows the date and
+              wants the grid to show them where it lives. A native date input
+              rather than a parsed text field: it brings the iOS wheel and the
+              Android calendar, validates itself against the bounds, and lays
+              its fields out in the reader's own locale order — none of which
+              four hand-written parsers would have got right. */}
+          <label
+            className={`${PRESSABLE} flex items-center gap-1.5 rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ios-blue sm:text-[13px] print:hidden`}
+          >
+            <span className="sr-only">{t.goToDate}</span>
+            <input
+              type="date"
+              value={dateInputValue}
+              min={`${MIN_YEAR}-01-01`}
+              max={`${MAX_YEAR}-12-31`}
+              onChange={e => goToDate(e.target.value)}
+              className="w-34 cursor-pointer appearance-none bg-transparent font-semibold tabular-nums text-ios-blue focus:outline-none"
+            />
+          </label>
             <button
-              key={key}
               type="button"
-              onClick={apply}
-              className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+              onClick={goToToday}
+              className={`${PRESSABLE} ${FOCUS_RING} flex items-center gap-1.5 rounded-full bg-ios-fill px-3 py-1.5 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
             >
-              {label}
+              <ArrowCounterclockwise className="h-[1.1em] w-[1.1em] shrink-0" />
+              {t.todayLabel}
             </button>
-          ))}
+          </div>
         </div>
 
         {/* iOS grouped-list footnote. Clear used to live here; it moved to the
             header, so this is now purely the instruction. */}
-        <p className="mt-3 px-1 text-[12px] leading-relaxed text-ios-label-2 sm:mt-4 sm:text-[13px] lg:col-start-1 lg:row-start-5 lg:mt-0">
-          {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
-        </p>
+        <div className="mt-3 px-1 sm:mt-4 lg:col-start-1 lg:row-start-5 lg:mt-0">
+          <p className="text-[12px] leading-relaxed text-ios-label-2 sm:text-[13px] print:hidden">
+            {t.hint} <span className="text-ios-label-3">{t.hintTouch}</span>
+          </p>
 
+          {/* The layout is unusual enough that a first-time reader sees an
+              abstract grid of abbreviations rather than a lookup table. The
+              one-line hint above says what to do; this says how it works, and
+              closes again so it costs a returning reader nothing.
+
+              A <details> rather than a tour or an animation: no JavaScript, no
+              motion, and it cannot fight the "nothing moves" property the rest
+              of the layout is built around. The worked example is computed from
+              the year on screen, so it is never a stale illustration. */}
+          <details
+            open={explainerOpen}
+            onToggle={e => setExplainerOpen(e.currentTarget.open)}
+            className="group mt-2 print:hidden"
+          >
+            <summary
+              className={`${PRESSABLE} ${FOCUS_RING} inline-flex cursor-pointer list-none items-center gap-1 rounded-full text-[12px] font-semibold text-ios-blue sm:text-[13px] [&::-webkit-details-marker]:hidden`}
+            >
+              <span className="inline-block transition-transform group-open:rotate-90">
+                <ChevronRight className="h-[0.9em] w-[0.9em]" />
+              </span>
+              {t.howToRead}
+            </summary>
+            <ol className="mt-2 list-inside list-decimal space-y-1 text-[12px] leading-relaxed text-ios-label-2 sm:text-[13px]">
+              <li>{t.stepMonth}</li>
+              <li>{t.stepDate}</li>
+              <li>{t.stepCross}</li>
+            </ol>
+            <p className="mt-2 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.worked}: <span className="font-semibold text-ios-label-2">{example.date}</span>{' '}
+              <span aria-hidden="true">→</span>{' '}
+              <span className="font-semibold text-ios-blue">{example.weekday}</span>
+            </p>
+            {/* The one mark on the grid that does not explain itself. It was
+                documented only in the README, which is not where someone looking
+                at the grid is. */}
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              <span className="underline decoration-2 underline-offset-2">{t.months[0]}</span>{' '}
+              {t.markerNote}
+            </p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.swipeHint}
+            </p>
+
+            {/* The two demonstrations, runnable. They read as examples here in a
+                way they never did as buttons parked beside Today. */}
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              <span className="text-[12px] font-semibold text-ios-label-3 sm:text-[13px]">
+                {t.tryIt}
+              </span>
+              {examples.map(({ key, label, apply }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={apply}
+                  className={`${PRESSABLE} ${FOCUS_RING} rounded-full bg-ios-fill px-3 py-1 text-[12px] font-semibold text-ios-blue sm:text-[13px]`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </details>
+        </div>
+
+        {/* Settings, at the foot of the page on a phone and of the left rail on
+            desktop. The language control came back here rather than to its old
+            slot above the grid, which the weekday filter now owns and earns. */}
+        <div className="mt-5 flex items-center gap-2 px-1 print:hidden lg:col-start-1 lg:row-start-6 lg:mt-4">
+          {/* Real radio inputs inside a fieldset: it looks like an iOS segmented
+              control but keeps native group semantics and native arrow-key
+              navigation, which an aria-pressed button set would have to
+              reimplement badly. */}
+          <fieldset className="min-w-0 flex-1">
+            <legend className="sr-only">{t.languageLabel}</legend>
+            <div className="flex rounded-full bg-ios-fill p-0.5">
+              {LANGUAGES.map(({ id, short }) => {
+                const isOn = language === id;
+                return (
+                  <label
+                    key={id}
+                    className={`${PRESSABLE} flex-1 cursor-pointer rounded-full py-1.5 text-center text-[12px] font-semibold transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-ios-blue sm:text-[13px] ${
+                      isOn ? 'bg-ios-thumb text-ios-label shadow-sm' : 'text-ios-label-2'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="language"
+                      value={id}
+                      checked={isOn}
+                      onChange={() => setLanguage(id)}
+                      className="sr-only"
+                    />
+                    {short}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
+
+        {/* The fourth axis, and the only part of this page that argues the word
+            "perpetual".
+
+            Everything above answers a question about one year. This says the
+            year barely matters: the grid above is one of exactly fourteen, and
+            these are the neighbours it also serves. It doubles as the lookup no
+            conventional calendar can do at all — every year listed puts *every*
+            date on the same weekday, so once you have found the year your
+            birthday is a Saturday, these are all the others.
+
+            Full width below both columns on desktop, because eleven year chips
+            do not fit a 15rem rail and this is the one block that belongs to the
+            whole page rather than to the controls. */}
+        <section
+          aria-label={t.yearTypeNav}
+          className="mt-5 lg:col-span-2 lg:row-start-7 lg:mt-2"
+        >
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1">
+            <h2 className="text-[12px] font-semibold text-ios-label-2 sm:text-[13px]">
+              {t.sameGridAs}
+            </h2>
+            {/* The dominical letter is the traditional name for precisely this
+                classification, so it is worth carrying — quietly, after the
+                phrase that actually explains it. */}
+            <p className="text-[12px] text-ios-label-3 sm:text-[13px]">
+              <span aria-hidden="true">·</span> {typePhrase}{' '}
+              <span title={t.calendarTypeLabel}>({dominicalLetterOf(calendarType)})</span>
+            </p>
+          </div>
+
+          {/* Scrolls rather than wraps: a fixed single row keeps the block's
+              height constant as the year changes, and a leap-year type returns
+              far fewer neighbours than a common-year one.
+
+              On paper it wraps instead. A scroll container prints only what fits
+              the first screenful, which clipped the list at the current year —
+              losing precisely the years the printed sheet exists to advertise. */}
+          <div className="mt-1.5 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none print:flex-wrap print:overflow-visible">
+            {sameGrid.map(y => {
+              const isCurrent = y === year;
+              return (
+                <button
+                  key={y}
+                  type="button"
+                  onClick={() => applyYear(y)}
+                  aria-current={isCurrent ? 'true' : undefined}
+                  className={`${PRESSABLE} ${FOCUS_RING} shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold tabular-nums ${
+                    isCurrent ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-blue'
+                  }`}
+                >
+                  {y}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Slide a physical perpetual calendar through every position and you
+              see its whole vocabulary at once. That is the half this app was
+              missing: a type could only be reached by already knowing a year of
+              that type, so the fourteen were a claim in the README rather than
+              something you could look at.
+
+              Each thumbnail is the month block's own silhouette — where the
+              twelve chips fall across the seven columns — which is the one thing
+              that distinguishes one type from another, and the reason two years
+              of a type render identical pages. Collapsed, so it costs a reader
+              who does not want it exactly one line. */}
+          <details className="group mt-3 px-1 print:hidden">
+            <summary
+              className={`${PRESSABLE} ${FOCUS_RING} inline-flex cursor-pointer list-none items-center gap-1 rounded-full text-[12px] font-semibold text-ios-blue sm:text-[13px] [&::-webkit-details-marker]:hidden`}
+            >
+              <span className="inline-block transition-transform group-open:rotate-90">
+                <ChevronRight className="h-[0.9em] w-[0.9em]" />
+              </span>
+              {t.allTypes}
+            </summary>
+
+            <p className="mt-1.5 text-[12px] leading-relaxed text-ios-label-3 sm:text-[13px]">
+              {t.allTypesNote}
+            </p>
+
+            <ul className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-7">
+              {allTypes.map(({ type, shape, letter, phrase, nearest }) => {
+                const isCurrent = type === calendarType;
+                return (
+                  <Fragment key={type}>
+                    {/* Both halves run Sunday to Saturday, so without a break
+                        the eighth tile reads as a repeat of the first rather
+                        than as the leap-year version of it — which undercuts
+                        the one thing this view exists to show. */}
+                    {(type === 0 || type === 7) && (
+                      <li className={`${SECTION_LABEL} col-span-full ${type === 0 ? '' : 'mt-2'}`}>
+                        {type === 0 ? t.commonYears : t.leapYears}
+                      </li>
+                    )}
+                    <li>
+                    <button
+                      type="button"
+                      disabled={nearest === null}
+                      onClick={() => nearest !== null && applyYear(nearest)}
+                      aria-current={isCurrent ? 'true' : undefined}
+                      aria-label={`${phrase} — ${nearest ?? ''}`}
+                      className={`${PRESSABLE} ${FOCUS_RING} flex w-full flex-col items-center gap-1 rounded-xl px-1.5 py-2 ${
+                        isCurrent ? 'bg-ios-blue-soft' : 'bg-ios-fill'
+                      }`}
+                    >
+                      {/* The silhouette: one cell per month, in its column,
+                          packed down exactly as the real block packs them. This
+                          is the whole difference between one type and the next,
+                          which is why two years of a type render the same page. */}
+                      <span aria-hidden="true" className="grid grid-cols-7 gap-px" title={phrase}>
+                        {Array.from({ length: MONTH_ROWS }, (_, r) =>
+                          shape.map((column, c) => {
+                            const filled = r >= MONTH_ROWS - column.length;
+                            return (
+                              <span
+                                key={`${r}-${c}`}
+                                className={`h-1.5 w-1.5 sm:h-2 sm:w-2 ${
+                                  filled
+                                    ? isCurrent
+                                      ? 'bg-ios-blue'
+                                      : 'bg-ios-label-3'
+                                    : 'bg-transparent'
+                                }`}
+                              />
+                            );
+                          }),
+                        )}
+                      </span>
+                      {/* The weekday leads, not the letter. Ordered Sunday to
+                          Saturday like every other weekday list on the page, the
+                          dominical letters come out A G F E D C B — correct, and
+                          unreadable as an ordering. The weekday is also the thing
+                          that actually determines the shape above it. */}
+                      <span
+                        className={`text-[11px] font-bold sm:text-[12px] ${
+                          isCurrent ? 'text-ios-blue' : 'text-ios-label-2'
+                        }`}
+                      >
+                        {t.weekdays[startWeekdayOfType(type)]}
+                      </span>
+                      <span className="text-[10px] tabular-nums text-ios-label-3 sm:text-[11px]">
+                        {nearest} · {letter}
+                      </span>
+                      </button>
+                    </li>
+                  </Fragment>
+                );
+              })}
+            </ul>
+          </details>
+        </section>
       </div>
+
+      {/* Fixed rather than in flow: a confirmation that shifted the page would
+          undo the "nothing moves" property the layout is built around. Only
+          reached where there is no native share sheet to speak for itself. */}
+      {copied && (
+        <div
+          role="status"
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-50 flex justify-center px-4 print:hidden"
+        >
+          <span className="rounded-full bg-ios-label px-4 py-2 text-[13px] font-semibold text-ios-bg shadow-lg">
+            {t.linkCopied}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

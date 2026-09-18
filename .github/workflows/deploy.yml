@@ -65,6 +65,10 @@ jobs:
         run: npm run build
         env:
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          # og:image has to be an absolute URL — crawlers do not resolve a
+          # relative one — so BASE_PATH is not enough here. configure-pages also
+          # reports the full origin, which keeps forks correct.
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5

@@ -54,3 +54,36 @@ export const XMark = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
     <path d="M6 6l12 12M18 6 6 18" />
   </svg>
 )
+
+/** SF `square.and.arrow.up` — the platform share affordance on iOS. */
+export const ShareUp = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
+  <svg {...base} strokeWidth={2.4} className={className}>
+    <path d="M12 3.4v11.2" />
+    <path d="M8.1 7.2 12 3.3l3.9 3.9" />
+    <path d="M8.2 10.4H5.6A1.6 1.6 0 0 0 4 12v7.4A1.6 1.6 0 0 0 5.6 21h12.8a1.6 1.6 0 0 0 1.6-1.6V12a1.6 1.6 0 0 0-1.6-1.6h-2.6" />
+  </svg>
+)
+
+/** SF `checkmark`, for the moment after a copy. */
+export const Checkmark = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
+  <svg {...base} className={className}>
+    <path d="M4.8 12.6 9.7 17.5 19.2 6.8" />
+  </svg>
+)
+
+/** SF `printer`. */
+export const Printer = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
+  <svg {...base} strokeWidth={2.2} className={className}>
+    <path d="M7 9.4V4.4h10v5" />
+    <path d="M7 17H5.4A1.4 1.4 0 0 1 4 15.6v-4.8a1.4 1.4 0 0 1 1.4-1.4h13.2A1.4 1.4 0 0 1 20 10.8v4.8a1.4 1.4 0 0 1-1.4 1.4H17" />
+    <path d="M7.4 14h9.2v5.6H7.4z" />
+  </svg>
+)
+
+/** SF `magnifyingglass`, marking the direct date entry. */
+export const MagnifyingGlass = ({ className = 'h-[1em] w-[1em]' }: IconProps) => (
+  <svg {...base} strokeWidth={2.4} className={className}>
+    <circle cx="10.8" cy="10.8" r="6.3" />
+    <path d="m15.4 15.4 4.3 4.3" />
+  </svg>
+)
